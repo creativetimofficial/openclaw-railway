@@ -1,9 +1,13 @@
 # Official OpenClaw Deployment for Railway
 # Build time: ~60-90 seconds
-FROM node:22-alpine
+FROM node:22-slim
 
 # Install required packages (minimal set)
-RUN apk add --no-cache bash curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set up directories
 WORKDIR /app
