@@ -38,7 +38,7 @@ This template:
 - **30-45 seconds** total (vs 5+ minutes for source builds)
 - Uses official npm package: `openclaw@latest`
 - Clean installation, no TTY/wizard issues
-- Minimal dependencies
+- Required dependencies: Node 22, Git, curl, ca-certificates
 
 ## Pairing Your Bot
 
