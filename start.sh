@@ -16,6 +16,7 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
 
   # Run onboard with all required flags
   openclaw onboard --non-interactive \
+    --accept-risk \
     --mode local \
     --auth-choice apiKey \
     --anthropic-api-key "$ANTHROPIC_API_KEY" \
@@ -63,4 +64,4 @@ echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 
 # Start the gateway (blocks)
-exec openclaw gateway start --foreground
+exec openclaw gateway start

@@ -20,6 +20,7 @@ This template:
 2. **Runs non-interactive onboarding** with:
    ```bash
    openclaw onboard --non-interactive \
+     --accept-risk \
      --mode local \
      --auth-choice apiKey \
      --anthropic-api-key "$ANTHROPIC_API_KEY" \
