@@ -17,7 +17,7 @@ Optional:
 This template:
 
 1. **Installs OpenClaw** via npm (`npm install -g openclaw@latest`) - ~15s
-2. **Runs non-interactive onboarding** with:
+2. **Runs non-interactive onboarding** (Docker mode - no systemd):
    ```bash
    openclaw onboard --non-interactive \
      --accept-risk \
@@ -25,13 +25,13 @@ This template:
      --auth-choice apiKey \
      --anthropic-api-key "$ANTHROPIC_API_KEY" \
      --gateway-port 18789 \
-     --gateway-bind 0.0.0.0 \
-     --install-daemon \
-     --daemon-runtime node \
      --workspace /data/workspace
    ```
 3. **Configures Telegram** via `TELEGRAM_BOT_TOKEN` environment variable
-4. **Starts gateway** on port 18789
+4. **Starts gateway** in foreground mode:
+   ```bash
+   openclaw gateway --port 18789
+   ```
 5. **Health check** endpoint on port 8080 (`/health`)
 
 ## Build Time

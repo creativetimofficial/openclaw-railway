@@ -14,16 +14,13 @@ mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"
 if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   echo "📝 Running non-interactive onboarding..."
 
-  # Run onboard with all required flags
+  # Run onboard with all required flags (Docker mode - no daemon)
   openclaw onboard --non-interactive \
     --accept-risk \
     --mode local \
     --auth-choice apiKey \
     --anthropic-api-key "$ANTHROPIC_API_KEY" \
     --gateway-port 18789 \
-    --gateway-bind 0.0.0.0 \
-    --install-daemon \
-    --daemon-runtime node \
     --workspace "$OPENCLAW_WORKSPACE_DIR" \
     --json || echo "⚠️  Onboard completed with warnings (this is normal)"
 
@@ -63,5 +60,5 @@ echo "🌐 Starting OpenClaw gateway on port 18789..."
 echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 
-# Start the gateway (blocks)
-exec openclaw gateway start
+# Start the gateway in Docker mode (foreground, no systemd)
+exec openclaw gateway --port 18789
