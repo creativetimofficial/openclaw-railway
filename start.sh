@@ -6,7 +6,6 @@ echo "🚀 Starting OpenClaw setup..."
 # Set config directories
 export OPENCLAW_STATE_DIR="/data/.openclaw"
 export OPENCLAW_WORKSPACE_DIR="/data/workspace"
-export OPENCLAW_HOME="/root/.openclaw"
 
 # Ensure directories exist
 mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"

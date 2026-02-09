@@ -1,5 +1,5 @@
 # Official OpenClaw Deployment for Railway
-# Build time: ~60-90 seconds
+# Build time: ~30-45 seconds (fast npm install)
 FROM node:22-slim
 
 # Install required packages (minimal set)
@@ -13,17 +13,13 @@ RUN apt-get update && \
 WORKDIR /app
 RUN mkdir -p /data/.openclaw /data/workspace
 
-# Install OpenClaw CLI (installer will fail on wizard but binary is installed)
-RUN curl -fsSL https://openclaw.ai/install.sh | bash 2>&1 || \
-    [ -f /root/.openclaw/bin/openclaw ] && echo "✓ OpenClaw binary installed successfully" || exit 1
-
-# Add OpenClaw to PATH
-ENV PATH="/root/.openclaw/bin:${PATH}"
+# Install OpenClaw via npm (clean, no TTY issues)
+RUN npm install -g openclaw@latest && \
+    echo "✓ OpenClaw $(openclaw --version) installed successfully"
 
 # Environment defaults
 ENV OPENCLAW_STATE_DIR="/data/.openclaw"
 ENV OPENCLAW_WORKSPACE_DIR="/data/workspace"
-ENV OPENCLAW_HOME="/root/.openclaw"
 
 # Copy startup script
 COPY start.sh /app/start.sh

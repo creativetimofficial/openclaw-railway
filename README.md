@@ -16,7 +16,7 @@ Optional:
 
 This template:
 
-1. **Installs OpenClaw** using the official installer (~30s)
+1. **Installs OpenClaw** via npm (`npm install -g openclaw@latest`) - ~15s
 2. **Runs non-interactive onboarding** with:
    ```bash
    openclaw onboard --non-interactive \
@@ -35,8 +35,9 @@ This template:
 
 ## Build Time
 
-- **60-90 seconds** total (vs 5+ minutes for source builds)
-- Uses official OpenClaw installer
+- **30-45 seconds** total (vs 5+ minutes for source builds)
+- Uses official npm package: `openclaw@latest`
+- Clean installation, no TTY/wizard issues
 - Minimal dependencies
 
 ## Pairing Your Bot
