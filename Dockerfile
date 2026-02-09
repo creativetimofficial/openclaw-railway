@@ -13,8 +13,9 @@ RUN apt-get update && \
 WORKDIR /app
 RUN mkdir -p /data/.openclaw /data/workspace
 
-# Install OpenClaw CLI (pre-built binaries)
-RUN curl -fsSL https://openclaw.ai/install.sh | bash
+# Install OpenClaw CLI (installer will fail on wizard but binary is installed)
+RUN curl -fsSL https://openclaw.ai/install.sh | bash 2>&1 || \
+    [ -f /root/.openclaw/bin/openclaw ] && echo "✓ OpenClaw binary installed successfully" || exit 1
 
 # Add OpenClaw to PATH
 ENV PATH="/root/.openclaw/bin:${PATH}"
