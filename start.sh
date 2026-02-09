@@ -25,6 +25,28 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
     --json || echo "⚠️  Onboard completed with warnings (this is normal)"
 
   echo "✅ Onboarding complete!"
+
+  # Auto-enable Telegram channel
+  echo "🔧 Enabling Telegram channel..."
+  openclaw doctor --fix || echo "⚠️  Doctor fix completed with warnings"
+
+  # Configure open DM policy for managed service (no pairing required)
+  echo "🔓 Configuring open DM policy for Telegram..."
+  node -e "
+    const fs = require('fs');
+    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (!config.channels) config.channels = {};
+      if (!config.channels.telegram) config.channels.telegram = {};
+      config.channels.telegram.dmPolicy = 'open';
+      config.channels.telegram.allowFrom = ['*'];
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      console.log('✅ DM policy set to open - no pairing required');
+    } catch (err) {
+      console.log('⚠️  Could not set DM policy:', err.message);
+    }
+  "
 else
   echo "ℹ️  Already onboarded, skipping setup"
 fi
@@ -33,7 +55,7 @@ fi
 # (OpenClaw will pick this up automatically)
 export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
-echo "🤖 Telegram bot configured via environment variable"
+echo "🤖 Telegram bot configured with open DM policy (no pairing required)"
 
 # Health check endpoint (runs in background)
 echo "🏥 Starting health check server on port 8080..."

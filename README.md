@@ -41,18 +41,14 @@ This template:
 - Clean installation, no TTY/wizard issues
 - Required dependencies: Node 22, Git, curl, ca-certificates
 
-## Pairing Your Bot
+## Bot Access
 
-After deployment:
+This template configures **open DM policy** for managed deployments:
+- ✅ **No pairing required** - Anyone can message your bot immediately
+- ✅ **Fully automated** - Bot is ready to use after deployment
+- ⚠️ **Security note** - Since you control the bot token, this is appropriate for personal/managed use
 
-1. Send `/start` to your Telegram bot
-2. Bot will respond with a pairing code
-3. Approve the pairing:
-   ```bash
-   openclaw pairing approve telegram <CODE>
-   ```
-
-For Railway deployments, you can run this via Railway's shell or create a separate pairing endpoint.
+The bot will respond immediately to `/start` without requiring pairing approval.
 
 ## Ports
 
@@ -65,13 +61,15 @@ For Railway deployments, you can run this via Railway's shell or create a separa
 - Check that `TELEGRAM_BOT_TOKEN` is set correctly
 - Verify token is from @BotFather
 - Check Railway logs for errors
+- Wait 60-90 seconds for full startup
 
 ### Health check fails
-- Wait 30-60 seconds after deployment
+- Wait 60-90 seconds after deployment for full initialization
 - Check that port 8080 is accessible
 - Review deployment logs for startup errors
+- Verify OpenClaw gateway started successfully
 
-### Pairing issues
-- Bot requires pairing before first use
-- Use `openclaw pairing approve telegram <CODE>` command
-- Check that DM policy is set to "pairing" in config
+### Bot asks for pairing code
+- This should not happen with this template (open DM policy)
+- If it does, check logs to ensure DM policy was set correctly
+- Config file location: `/data/.openclaw/openclaw.json`
