@@ -4,22 +4,72 @@ Minimal OpenClaw deployment template using the official installation method.
 
 ## Environment Variables
 
+Required:
 - `ANTHROPIC_API_KEY` - Your Anthropic API key
 - `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather
-- `BOT_NAME` - Name for your bot (optional)
 
-## Manual Setup
-
-1. Install Railway CLI: `npm install -g @railway/cli`
-2. Login: `railway login`
-3. Deploy: `railway up`
+Optional:
+- `BOT_NAME` - Name for your bot (metadata only)
+- `USER_ID` - User ID (metadata only)
 
 ## How It Works
 
 This template:
-1. Installs OpenClaw CLI using the official installer
-2. Automatically configures Telegram and Anthropic API
-3. Starts the gateway service
-4. Exposes health check endpoint on port 8080
 
-Build time: ~60-90 seconds (vs 5+ minutes for source builds)
+1. **Installs OpenClaw** using the official installer (~30s)
+2. **Runs non-interactive onboarding** with:
+   ```bash
+   openclaw onboard --non-interactive \
+     --mode local \
+     --auth-choice apiKey \
+     --anthropic-api-key "$ANTHROPIC_API_KEY" \
+     --gateway-port 18789 \
+     --gateway-bind 0.0.0.0 \
+     --install-daemon \
+     --daemon-runtime node \
+     --workspace /data/workspace
+   ```
+3. **Configures Telegram** via `TELEGRAM_BOT_TOKEN` environment variable
+4. **Starts gateway** on port 18789
+5. **Health check** endpoint on port 8080 (`/health`)
+
+## Build Time
+
+- **60-90 seconds** total (vs 5+ minutes for source builds)
+- Uses official OpenClaw installer
+- Minimal dependencies
+
+## Pairing Your Bot
+
+After deployment:
+
+1. Send `/start` to your Telegram bot
+2. Bot will respond with a pairing code
+3. Approve the pairing:
+   ```bash
+   openclaw pairing approve telegram <CODE>
+   ```
+
+For Railway deployments, you can run this via Railway's shell or create a separate pairing endpoint.
+
+## Ports
+
+- `18789` - OpenClaw gateway (internal)
+- `8080` - Health check endpoint (public)
+
+## Troubleshooting
+
+### Bot not responding
+- Check that `TELEGRAM_BOT_TOKEN` is set correctly
+- Verify token is from @BotFather
+- Check Railway logs for errors
+
+### Health check fails
+- Wait 30-60 seconds after deployment
+- Check that port 8080 is accessible
+- Review deployment logs for startup errors
+
+### Pairing issues
+- Bot requires pairing before first use
+- Use `openclaw pairing approve telegram <CODE>` command
+- Check that DM policy is set to "pairing" in config

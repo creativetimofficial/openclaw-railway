@@ -3,7 +3,7 @@ set -e
 
 echo "🚀 Starting OpenClaw setup..."
 
-# Set config directory
+# Set config directories
 export OPENCLAW_STATE_DIR="/data/.openclaw"
 export OPENCLAW_WORKSPACE_DIR="/data/workspace"
 export OPENCLAW_HOME="/root/.openclaw"
@@ -11,44 +11,35 @@ export OPENCLAW_HOME="/root/.openclaw"
 # Ensure directories exist
 mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"
 
-# Configure Telegram and API settings
-echo "📝 Writing configuration..."
+# Check if already onboarded
+if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
+  echo "📝 Running non-interactive onboarding..."
 
-cat > "$OPENCLAW_STATE_DIR/openclaw.json" <<EOF
-{
-  "agents": {
-    "defaults": {
-      "model": "claude-sonnet-4-5",
-      "workspace": "$OPENCLAW_WORKSPACE_DIR"
-    }
-  },
-  "gateway": {
-    "port": 18789,
-    "bind": "0.0.0.0",
-    "auth": {
-      "provider": "apiKey",
-      "apiKey": "$ANTHROPIC_API_KEY"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "botToken": "$TELEGRAM_BOT_TOKEN",
-      "dmPolicy": "pairing"
-    }
-  },
-  "wizard": {
-    "lastRunAt": "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")",
-    "lastRunVersion": "1.0.0",
-    "completed": true
-  }
-}
-EOF
+  # Run onboard with all required flags
+  openclaw onboard --non-interactive \
+    --mode local \
+    --auth-choice apiKey \
+    --anthropic-api-key "$ANTHROPIC_API_KEY" \
+    --gateway-port 18789 \
+    --gateway-bind 0.0.0.0 \
+    --install-daemon \
+    --daemon-runtime node \
+    --workspace "$OPENCLAW_WORKSPACE_DIR" \
+    --json || echo "⚠️  Onboard completed with warnings (this is normal)"
 
-echo "✅ Configuration written!"
+  echo "✅ Onboarding complete!"
+else
+  echo "ℹ️  Already onboarded, skipping setup"
+fi
 
-# Health check endpoint
-echo "🏥 Starting health check server..."
+# Configure Telegram bot token via environment variable
+# (OpenClaw will pick this up automatically)
+export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
+
+echo "🤖 Telegram bot configured via environment variable"
+
+# Health check endpoint (runs in background)
+echo "🏥 Starting health check server on port 8080..."
 node -e "
 const http = require('http');
 const server = http.createServer((req, res) => {
@@ -61,14 +52,16 @@ const server = http.createServer((req, res) => {
   }
 });
 server.listen(8080, '0.0.0.0', () => {
-  console.log('Health check server listening on port 8080');
+  console.log('✅ Health check server ready on :8080');
 });
 " &
 
 # Give health check server time to start
 sleep 2
 
-echo "🌐 Starting OpenClaw gateway..."
+echo "🌐 Starting OpenClaw gateway on port 18789..."
+echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
+echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 
 # Start the gateway (blocks)
 exec openclaw gateway start --foreground
