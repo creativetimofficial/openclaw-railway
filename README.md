@@ -2,10 +2,6 @@
 
 Minimal OpenClaw deployment template using the official installation method.
 
-## Quick Deploy to Railway
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/openclaw)
-
 ## Environment Variables
 
 - `ANTHROPIC_API_KEY` - Your Anthropic API key
