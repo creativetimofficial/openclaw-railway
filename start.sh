@@ -44,6 +44,7 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.channels.telegram.enabled = true;
       config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
       config.channels.telegram.dmPolicy = 'open'; // Secure by default
+      config.channels.telegram.allowFrom = ['*'];
 
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
       console.log('✅ Telegram channel enabled with bot token in config');
