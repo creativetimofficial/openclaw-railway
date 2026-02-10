@@ -41,14 +41,33 @@ This template:
 - Clean installation, no TTY/wizard issues
 - Required dependencies: Node 22, Git, curl, ca-certificates
 
-## Bot Access
+## Bot Access - Auto-Approve First User
 
-This template configures **open DM policy** for managed deployments:
-- ✅ **No pairing required** - Anyone can message your bot immediately
-- ✅ **Fully automated** - Bot is ready to use after deployment
-- ⚠️ **Security note** - Since you control the bot token, this is appropriate for personal/managed use
+This template uses a **secure auto-approval system**:
 
-The bot will respond immediately to `/start` without requiring pairing approval.
+### How It Works
+1. ✅ **Bot deploys in secure pairing mode** - Unknown users get pairing codes
+2. ✅ **First user is auto-approved** - When you send `/start`, you're instantly approved
+3. ✅ **Additional users require manual approval** - Others must be approved via dashboard
+4. ✅ **No extra setup needed** - Just send `/start` to your bot after deployment
+
+### Security Benefits
+- 🔒 **Prevents API cost leaks** - Only approved users can use your bot
+- 🔒 **Zero friction UX** - Owner gets instant access
+- 🔒 **Granular control** - Manually approve family/team members via dashboard
+
+### What Happens
+```
+1. Deploy bot → Wait 60-90 seconds for startup
+2. Send /start to your Telegram bot
+3. Auto-approved! Start chatting immediately
+4. Dashboard shows notification: "First user auto-approved!"
+```
+
+### For Additional Users
+Other users who message your bot will receive a pairing code. You can approve them via:
+1. Dashboard UI (coming soon)
+2. Railway shell: `openclaw pairing approve telegram <CODE>`
 
 ## Ports
 

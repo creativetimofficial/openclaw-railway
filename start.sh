@@ -30,23 +30,8 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   echo "🔧 Enabling Telegram channel..."
   openclaw doctor --fix || echo "⚠️  Doctor fix completed with warnings"
 
-  # Configure open DM policy for managed service (no pairing required)
-  echo "🔓 Configuring open DM policy for Telegram..."
-  node -e "
-    const fs = require('fs');
-    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
-    try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      if (!config.channels) config.channels = {};
-      if (!config.channels.telegram) config.channels.telegram = {};
-      config.channels.telegram.dmPolicy = 'open';
-      config.channels.telegram.allowFrom = ['*'];
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      console.log('✅ DM policy set to open - no pairing required');
-    } catch (err) {
-      console.log('⚠️  Could not set DM policy:', err.message);
-    }
-  "
+  # Use secure pairing mode (default)
+  echo "🔐 Using secure pairing mode - first user will be auto-approved"
 else
   echo "ℹ️  Already onboarded, skipping setup"
 fi
@@ -55,7 +40,16 @@ fi
 # (OpenClaw will pick this up automatically)
 export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
-echo "🤖 Telegram bot configured with open DM policy (no pairing required)"
+# Start Pairing Management API on port 8081
+echo "🔐 Starting Pairing Management API on port 8081..."
+node /app/pairing-api.js &
+
+# Start auto-approval monitor for first user
+echo "👀 Starting first-user auto-approval monitor..."
+node /app/auto-approve-first.js &
+
+sleep 2
+echo "🤖 Telegram bot configured - first user will be auto-approved!"
 
 # Health check endpoint (runs in background)
 echo "🏥 Starting health check server on port 8080..."
