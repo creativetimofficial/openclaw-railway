@@ -27,8 +27,11 @@ This template:
      --gateway-port 18789 \
      --workspace /data/workspace
    ```
-3. **Configures Telegram** via `TELEGRAM_BOT_TOKEN` environment variable
-4. **Starts gateway** in foreground mode:
+3. **Enables Telegram channel**:
+   - Runs `openclaw doctor --fix` to detect channels
+   - Manually sets `channels.telegram.enabled = true` in config
+4. **Starts auto-approval monitor** for first user
+5. **Starts gateway** in foreground mode:
    ```bash
    openclaw gateway --port 18789
    ```

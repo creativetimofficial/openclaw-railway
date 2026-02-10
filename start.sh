@@ -30,6 +30,26 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   echo "🔧 Enabling Telegram channel..."
   openclaw doctor --fix || echo "⚠️  Doctor fix completed with warnings"
 
+  # Manually enable Telegram in config (doctor --fix detects but doesn't enable)
+  echo "🔧 Manually enabling Telegram channel in config..."
+  node -e "
+    const fs = require('fs');
+    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (!config.channels) config.channels = {};
+      if (!config.channels.telegram) config.channels.telegram = {};
+
+      // Enable the Telegram channel
+      config.channels.telegram.enabled = true;
+
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      console.log('✅ Telegram channel enabled in config');
+    } catch (err) {
+      console.log('⚠️  Could not enable Telegram channel:', err.message);
+    }
+  "
+
   # Use secure pairing mode (default)
   echo "🔐 Using secure pairing mode - first user will be auto-approved"
 else
