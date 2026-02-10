@@ -40,11 +40,13 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       if (!config.channels) config.channels = {};
       if (!config.channels.telegram) config.channels.telegram = {};
 
-      // Enable the Telegram channel
+      // Enable the Telegram channel and set bot token
       config.channels.telegram.enabled = true;
+      config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
+      config.channels.telegram.dmPolicy = 'pairing'; // Secure by default
 
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      console.log('✅ Telegram channel enabled in config');
+      console.log('✅ Telegram channel enabled with bot token in config');
     } catch (err) {
       console.log('⚠️  Could not enable Telegram channel:', err.message);
     }
