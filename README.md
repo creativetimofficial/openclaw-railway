@@ -16,7 +16,7 @@ Optional:
 
 This template:
 
-1. **Installs OpenClaw** via npm (`npm install -g openclaw@2026.2.9`) - ~15s
+1. **Installs OpenClaw** via npm (`npm install -g openclaw@2026.2.6`) - ~15s
 2. **Runs non-interactive onboarding** (Docker mode - no systemd):
    ```bash
    openclaw onboard --non-interactive \
@@ -28,14 +28,16 @@ This template:
      --workspace /data/workspace
    ```
 3. **Enables Telegram channel**:
-   - Runs `openclaw doctor --fix` to detect channels
-   - Manually sets `channels.telegram.enabled = true` in config
-4. **Starts auto-approval monitor** for first user
-5. **Starts gateway** in foreground mode:
-   ```bash
-   openclaw gateway --port 18789
-   ```
-5. **Health check** endpoint on port 8080 (`/health`)
+   - Sets `channels.telegram.enabled = true` with open DM policy
+   - Runs `openclaw doctor --fix` to apply configuration
+4. **Enables HTTP API endpoints**:
+   - Enables `/v1/chat/completions` for web chat interface
+   - Configures gateway authentication token
+5. **Starts gateway** in foreground mode on port 18789
+6. **Starts API server** on port 8081:
+   - `/health` - Health check endpoint
+   - `/chat` - Chat proxy to gateway
+   - `/stats/*` - Usage statistics endpoints
 
 ## Build Time
 
@@ -44,22 +46,28 @@ This template:
 - Clean installation, no TTY/wizard issues
 - Required dependencies: Node 22, Git, curl, ca-certificates
 
-## Bot Access - Open Mode
+## Bot Access
 
-This template uses **open access mode** for simplicity:
+### Web Chat Interface (Recommended)
+The easiest way to interact with your agent is through the **dashboard chat interface**:
 
-### How It Works
+1. Deploy bot → Wait 2-3 minutes for build & startup
+2. Go to your dashboard at your-site.com/dashboard/openclaw
+3. Click "Chat" button on your agent card
+4. Start chatting directly with your AI assistant!
+
+**Features:**
+- ✅ **Direct HTTP API access** - No Telegram pairing needed
+- ✅ **Session continuity** - Conversation history maintained
+- ✅ **Instant access** - Chat immediately after deployment
+- ✅ **Web-based** - Works on any device with a browser
+
+### Telegram Access (Optional)
+You can also access your agent via Telegram with **open access mode**:
+
 - ✅ **Bot accepts messages from anyone** - No pairing required
 - ✅ **Instant access** - Send `/start` and start chatting immediately
-- ✅ **Perfect for personal/testing use** - No manual approval needed
-
-### What Happens
-```
-1. Deploy bot → Wait 2-3 minutes for build & startup
-2. Go to Telegram and send /start to your bot
-3. Bot responds immediately
-4. Start chatting with your AI assistant!
-```
+- ✅ **Perfect for mobile use** - Chat from anywhere
 
 ### Security Options
 

@@ -55,6 +55,24 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
         allowFrom: ['*']
       };
 
+      // Enable HTTP endpoints for web chat interface
+      if (!config.gateway) config.gateway = {};
+      if (!config.gateway.http) config.gateway.http = {};
+      if (!config.gateway.http.endpoints) config.gateway.http.endpoints = {};
+
+      config.gateway.http.endpoints.chatCompletions = {
+        enabled: true
+      };
+
+      config.gateway.http.endpoints.responses = {
+        enabled: true
+      };
+
+      // Set gateway authentication token (use pairing API secret)
+      if (!config.gateway.auth) config.gateway.auth = {};
+      config.gateway.auth.mode = 'token';
+      config.gateway.auth.token = process.env.PAIRING_API_SECRET;
+
       // Write config
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 

@@ -14,6 +14,59 @@ const execAsync = promisify(exec);
 const PORT = 8081;
 const API_SECRET = process.env.PAIRING_API_SECRET || 'change-me-in-production';
 const STATE_DIR = process.env.OPENCLAW_STATE_DIR || '/data/.openclaw';
+const GATEWAY_URL = 'http://127.0.0.1:18789';
+
+/**
+ * Chat Proxy Functions
+ */
+
+/**
+ * Proxy chat request to OpenClaw gateway
+ */
+async function proxyChatRequest(body, isStreaming = false) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+
+    const options = {
+      hostname: '127.0.0.1',
+      port: 18789,
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_SECRET}`,
+        'Content-Type': 'application/json',
+        'Content-Length': data.length
+      }
+    };
+
+    const req = http.request(options, (res) => {
+      if (isStreaming) {
+        // For streaming, return the response object directly
+        resolve(res);
+      } else {
+        let responseData = '';
+        res.on('data', (chunk) => {
+          responseData += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(responseData);
+            resolve({ statusCode: res.statusCode, data: parsed });
+          } catch (err) {
+            resolve({ statusCode: res.statusCode, data: responseData });
+          }
+        });
+      }
+    });
+
+    req.on('error', (error) => {
+      reject(error);
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
 
 /**
  * Stats Collection Functions
@@ -176,6 +229,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /chat - Proxy chat requests to OpenClaw gateway
+  if (req.method === 'POST' && url.pathname === '/chat') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const chatRequest = JSON.parse(body);
+        const isStreaming = chatRequest.stream === true;
+
+        const result = await proxyChatRequest(chatRequest, isStreaming);
+
+        if (isStreaming) {
+          // Forward streaming response
+          res.writeHead(result.statusCode, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+          });
+          result.pipe(res);
+        } else {
+          // Forward non-streaming response
+          res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result.data));
+        }
+      } catch (error) {
+        console.error('Chat proxy error:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+    });
+    return;
+  }
+
   // GET /stats/usage - Get usage and cost statistics
   if (req.method === 'GET' && url.pathname === '/stats/usage') {
     const result = await getUsageStats();
@@ -223,12 +309,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`📊 OpenClaw Stats API listening on port ${PORT}`);
+  console.log(`📊 OpenClaw API listening on port ${PORT}`);
   console.log(`   `);
   console.log(`   Public endpoints (no auth required):`);
   console.log(`   GET  /health - Health check`);
   console.log(`   `);
   console.log(`   Protected endpoints (require Bearer token):`);
+  console.log(`   POST /chat - Chat with agent (proxies to gateway)`);
   console.log(`   GET  /stats/usage - Get usage and cost statistics`);
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
   console.log(`   GET  /stats/sessions - Get session list`);
