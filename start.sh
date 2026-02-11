@@ -3,12 +3,19 @@ set -e
 
 echo "🚀 Starting OpenClaw setup..."
 
-# Set config directories
+# Set config directories and bot credentials
 export OPENCLAW_STATE_DIR="/data/.openclaw"
 export OPENCLAW_WORKSPACE_DIR="/data/workspace"
+export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
 # Ensure directories exist
 mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"
+
+echo "📋 Environment check:"
+echo "   OPENCLAW_STATE_DIR: $OPENCLAW_STATE_DIR"
+echo "   OPENCLAW_WORKSPACE_DIR: $OPENCLAW_WORKSPACE_DIR"
+echo "   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:0:15}..."
+echo "   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:0:15}..."
 
 # Check if already onboarded
 if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
@@ -26,43 +33,60 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
 
   echo "✅ Onboarding complete!"
 
-  # Auto-enable Telegram channel
+  # Configure Telegram channel properly
   echo "🔧 Configuring Telegram channel..."
 
-  # Manually enable Telegram in config with proper DM policy for pairing
-  echo "🔧 Enabling Telegram with pairing mode..."
+  # Use OpenClaw's built-in config method instead of manual JSON editing
   node -e "
     const fs = require('fs');
     const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
     try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+      // Ensure channels object exists
       if (!config.channels) config.channels = {};
       if (!config.channels.telegram) config.channels.telegram = {};
 
-      // Enable the Telegram channel and set bot token
-      config.channels.telegram.enabled = true;
-      config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
+      // Enable the Telegram channel with bot token
+      config.channels.telegram = {
+        enabled: true,
+        botToken: process.env.TELEGRAM_BOT_TOKEN,
+        dmPolicy: 'pairing',
+        allowFrom: [],
+        pairing: {
+          enabled: true
+        }
+      };
 
-      // Use pairing mode for security (first user will be auto-approved)
-      config.channels.telegram.dmPolicy = 'pairing';
-      config.channels.telegram.allowFrom = [];
+      // Write config
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      console.log('✅ Telegram channel enabled with pairing mode');
+      // Verify it was written
+      const verify = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (verify.channels && verify.channels.telegram && verify.channels.telegram.enabled) {
+        console.log('✅ Telegram channel enabled successfully');
+        console.log('   DM Policy: pairing');
+        console.log('   Bot Token: ' + process.env.TELEGRAM_BOT_TOKEN.substring(0, 10) + '...');
+      } else {
+        console.log('⚠️  WARNING: Telegram channel may not be enabled!');
+      }
     } catch (err) {
-      console.log('⚠️  Could not enable Telegram channel:', err.message);
+      console.log('❌ Could not enable Telegram channel:', err.message);
+      process.exit(1);
     }
   "
 
-  # Use secure pairing mode (default)
+  if [ $? -ne 0 ]; then
+    echo "❌ Failed to configure Telegram. Exiting."
+    exit 1
+  fi
+
   echo "🔐 Using secure pairing mode - first user will be auto-approved"
+  echo "⏳ Waiting for config to stabilize..."
+  sleep 2
 else
   echo "ℹ️  Already onboarded, skipping setup"
 fi
-
-# Configure Telegram bot token via environment variable
-# (OpenClaw will pick this up automatically)
-export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
 # Start Pairing Management API on port 8081 (includes /health endpoint)
 echo "🔐 Starting Pairing Management API on port 8081..."
@@ -75,9 +99,32 @@ echo "ℹ️  Pairing will be activated from dashboard after deployment complete
 sleep 3
 echo "✅ Pairing API ready - Railway will health check on port 8081"
 
+# Verify Telegram config before starting gateway
+echo "🔍 Verifying Telegram channel configuration..."
+node -e "
+  const fs = require('fs');
+  const config = JSON.parse(fs.readFileSync('$OPENCLAW_STATE_DIR/openclaw.json', 'utf8'));
+  console.log('Telegram config:', JSON.stringify(config.channels?.telegram || {}, null, 2));
+  if (!config.channels?.telegram?.enabled) {
+    console.error('❌ CRITICAL: Telegram channel is NOT enabled!');
+    process.exit(1);
+  }
+  console.log('✅ Telegram channel is enabled');
+"
+
+if [ $? -ne 0 ]; then
+  echo "❌ Telegram configuration check failed. Cannot start gateway."
+  echo "📋 Config file contents:"
+  cat "$OPENCLAW_STATE_DIR/openclaw.json"
+  exit 1
+fi
+
 echo "🌐 Starting OpenClaw gateway on port 18789..."
 echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
+echo ""
+echo "⚠️  IMPORTANT: Gateway will now start. Watch for Telegram channel status in logs."
+echo ""
 
 # Start the gateway in Docker mode (foreground, no systemd)
 exec openclaw gateway --port 18789
