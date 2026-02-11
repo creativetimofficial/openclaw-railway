@@ -79,6 +79,11 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   fi
 
   echo "🔐 Using secure pairing mode - first user will be auto-approved"
+
+  # Run doctor to properly enable Telegram channel
+  echo "🩺 Running openclaw doctor --fix to enable Telegram channel..."
+  openclaw doctor --fix || echo "⚠️  Doctor completed with warnings (this is normal)"
+
   echo "⏳ Waiting for config to stabilize..."
   sleep 2
 else
