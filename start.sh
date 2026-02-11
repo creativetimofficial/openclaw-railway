@@ -27,11 +27,10 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   echo "✅ Onboarding complete!"
 
   # Auto-enable Telegram channel
-  echo "🔧 Enabling Telegram channel..."
-  openclaw doctor --fix || echo "⚠️  Doctor fix completed with warnings"
+  echo "🔧 Configuring Telegram channel..."
 
-  # Manually enable Telegram in config (doctor --fix detects but doesn't enable)
-  echo "🔧 Manually enabling Telegram channel in config..."
+  # Manually enable Telegram in config with proper DM policy for pairing
+  echo "🔧 Enabling Telegram with pairing mode..."
   node -e "
     const fs = require('fs');
     const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
@@ -43,11 +42,13 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       // Enable the Telegram channel and set bot token
       config.channels.telegram.enabled = true;
       config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
-      config.channels.telegram.dmPolicy = 'open'; // Secure by default
-      config.channels.telegram.allowFrom = ['*'];
+
+      // Use pairing mode for security (first user will be auto-approved)
+      config.channels.telegram.dmPolicy = 'pairing';
+      config.channels.telegram.allowFrom = [];
 
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      console.log('✅ Telegram channel enabled with bot token in config');
+      console.log('✅ Telegram channel enabled with pairing mode');
     } catch (err) {
       console.log('⚠️  Could not enable Telegram channel:', err.message);
     }

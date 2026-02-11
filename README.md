@@ -49,10 +49,10 @@ This template:
 This template uses a **secure auto-approval system**:
 
 ### How It Works
-1. ✅ **Bot deploys in secure pairing mode** - Unknown users get pairing codes
-2. ✅ **First user is auto-approved** - When you send `/start`, you're instantly approved
-3. ✅ **Additional users require manual approval** - Others must be approved via dashboard
-4. ✅ **No extra setup needed** - Just send `/start` to your bot after deployment
+1. ✅ **Bot deploys in secure pairing mode** - Unknown users must pair before chatting
+2. ✅ **Auto-approval activated from dashboard** - When deployment completes, auto-approval starts
+3. ✅ **First user is auto-approved** - When you send `/start`, you're instantly approved
+4. ✅ **Additional users require manual approval** - Others must be approved via dashboard
 
 ### Security Benefits
 - 🔒 **Prevents API cost leaks** - Only approved users can use your bot
@@ -61,15 +61,30 @@ This template uses a **secure auto-approval system**:
 
 ### What Happens
 ```
-1. Deploy bot → Wait 60-90 seconds for startup
-2. Send /start to your Telegram bot
-3. Auto-approved! Start chatting immediately
-4. Dashboard shows notification: "First user auto-approved!"
+1. Deploy bot → Wait 2-3 minutes for build & startup
+2. Dashboard detects "Active" status → Auto-approval starts automatically
+3. Go to Telegram and send /start to your bot
+4. Bot responds with "You've been paired!"
+5. Start chatting with your AI assistant!
+6. Dashboard shows notification: "First user auto-approved!"
 ```
+
+### Troubleshooting
+
+**Bot doesn't respond to /start:**
+- Wait 2-3 minutes after deployment for full startup
+- Check that bot token is correct (from @BotFather)
+- Verify agent status is "Active" in dashboard
+- Check Railway logs for errors
+
+**Bot says "Pairing required":**
+- Auto-approval may not have started - check dashboard
+- First user may have already been approved (you're the second user)
+- Check Railway logs for auto-approval status
 
 ### For Additional Users
 Other users who message your bot will receive a pairing code. You can approve them via:
-1. Dashboard UI (coming soon)
+1. Dashboard UI → Agent Details → Pairing tab
 2. Railway shell: `openclaw pairing approve telegram <CODE>`
 
 ## Ports

@@ -48,8 +48,8 @@ async function approvePairing(channel, code) {
  */
 function startAutoApprove() {
   if (autoApproveProcess) {
-    console.log('⚠️  Auto-approve monitor already running');
-    return { success: false, error: 'Monitor already running' };
+    console.log('ℹ️  Auto-approve monitor already running (this is fine)');
+    return { success: true, message: 'Auto-approve monitor already running', alreadyRunning: true };
   }
 
   console.log('🚀 Starting auto-approve monitor...');
