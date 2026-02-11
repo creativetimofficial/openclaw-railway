@@ -250,15 +250,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Auth check
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // GET /health - Health check (no auth required for Railway health checks)
+  if (req.method === 'GET' && url.pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', service: 'openclaw-pairing-api' }));
+    return;
+  }
+
+  // Auth check (required for all endpoints except /health)
   const authHeader = req.headers.authorization;
   if (!authHeader || authHeader !== `Bearer ${API_SECRET}`) {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
-
-  const url = new URL(req.url, `http://${req.headers.host}`);
 
   // GET /pairing/list - List pending pairing requests
   if (req.method === 'GET' && url.pathname === '/pairing/list') {
@@ -382,13 +389,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // GET /health - Health check
-  if (req.method === 'GET' && url.pathname === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'pairing-api' }));
-    return;
-  }
-
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
@@ -396,7 +396,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🔐 Pairing API listening on port ${PORT}`);
+  console.log(`   `);
+  console.log(`   Public endpoints (no auth required):`);
   console.log(`   GET  /health - Health check`);
+  console.log(`   `);
+  console.log(`   Protected endpoints (require Bearer token):`);
   console.log(`   GET  /first-user - Get first approved user info`);
   console.log(`   GET  /pairing/list?channel=telegram - List pending pairings`);
   console.log(`   POST /pairing/approve - Approve a pairing code`);
@@ -407,5 +411,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
   console.log(`   GET  /stats/sessions - Get session list`);
   console.log(`   GET  /stats/activity - Get activity summary`);
+  console.log(`   `);
   console.log(`   Auth: Bearer ${API_SECRET.substring(0, 10)}...`);
 });

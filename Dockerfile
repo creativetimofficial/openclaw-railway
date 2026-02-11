@@ -29,10 +29,9 @@ COPY auto-approve-first.js /app/auto-approve-first.js
 RUN chmod +x /app/start.sh
 
 # Expose ports
-# 18789 - OpenClaw gateway
-# 8080 - Health check endpoint
-# 8081 - Pairing management API
-EXPOSE 18789 8080 8081
+# 8081 - Pairing management API (includes /health endpoint)
+# 18789 - OpenClaw gateway (internal)
+EXPOSE 8081 18789
 
 # Start OpenClaw
 CMD ["/app/start.sh"]

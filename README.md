@@ -74,8 +74,8 @@ Other users who message your bot will receive a pairing code. You can approve th
 
 ## Ports
 
-- `18789` - OpenClaw gateway (internal)
-- `8080` - Health check endpoint (public)
+- `8081` - Pairing Management API with health check endpoint (public)
+- `18789` - OpenClaw gateway (internal, localhost only)
 
 ## Troubleshooting
 

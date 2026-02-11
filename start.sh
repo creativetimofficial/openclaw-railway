@@ -63,35 +63,16 @@ fi
 # (OpenClaw will pick this up automatically)
 export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
-# Start Pairing Management API on port 8081
+# Start Pairing Management API on port 8081 (includes /health endpoint)
 echo "🔐 Starting Pairing Management API on port 8081..."
 node /app/pairing-api.js &
 
 # Note: Auto-approval monitor will be started by the UI dashboard after build completes
 echo "ℹ️  Pairing will be activated from dashboard after deployment completes"
 
-sleep 2
-
-# Health check endpoint (runs in background)
-echo "🏥 Starting health check server on port 8080..."
-node -e "
-const http = require('http');
-const server = http.createServer((req, res) => {
-  if (req.url === '/' || req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'healthy', service: 'openclaw' }));
-  } else {
-    res.writeHead(404);
-    res.end();
-  }
-});
-server.listen(8080, '0.0.0.0', () => {
-  console.log('✅ Health check server ready on :8080');
-});
-" &
-
-# Give health check server time to start
-sleep 2
+# Give pairing API time to start
+sleep 3
+echo "✅ Pairing API ready - Railway will health check on port 8081"
 
 echo "🌐 Starting OpenClaw gateway on port 18789..."
 echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
