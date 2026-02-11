@@ -22,14 +22,13 @@ RUN npm install -g openclaw@2026.2.6 && \
 ENV OPENCLAW_STATE_DIR="/data/.openclaw"
 ENV OPENCLAW_WORKSPACE_DIR="/data/workspace"
 
-# Copy startup script, pairing API, and auto-approve monitor
+# Copy startup script and stats API
 COPY start.sh /app/start.sh
 COPY pairing-api.js /app/pairing-api.js
-COPY auto-approve-first.js /app/auto-approve-first.js
 RUN chmod +x /app/start.sh
 
 # Expose ports
-# 8081 - Pairing management API (includes /health endpoint)
+# 8081 - Stats API (includes /health endpoint)
 # 18789 - OpenClaw gateway (internal)
 EXPOSE 8081 18789
 

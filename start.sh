@@ -90,16 +90,13 @@ else
   echo "ℹ️  Already onboarded, skipping setup"
 fi
 
-# Start Pairing Management API on port 8081 (includes /health endpoint)
-echo "🔐 Starting Pairing Management API on port 8081..."
+# Start Stats API on port 8081 (includes /health endpoint)
+echo "📊 Starting Stats API on port 8081..."
 node /app/pairing-api.js &
 
-# Note: Auto-approval monitor will be started by the UI dashboard after build completes
-echo "ℹ️  Pairing will be activated from dashboard after deployment completes"
-
-# Give pairing API time to start
+# Give stats API time to start
 sleep 3
-echo "✅ Pairing API ready - Railway will health check on port 8081"
+echo "✅ Stats API ready - Railway will health check on port 8081"
 
 # Verify Telegram config before starting gateway
 echo "🔍 Verifying Telegram channel configuration..."

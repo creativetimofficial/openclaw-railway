@@ -87,13 +87,13 @@ This template uses **open access mode** for simplicity:
 - Look for: `[telegram] [default] starting provider`
 
 **Bot says "Access not configured":**
-- This means the gateway is using pairing/allowlist mode
 - Check that `dmPolicy: 'open'` is set in config
-- Run `openclaw doctor --fix` to apply config changes
+- Check Railway logs for Telegram channel status
+- Verify: `openclaw doctor --fix` ran successfully during startup
 
 ## Ports
 
-- `8081` - Pairing Management API with health check endpoint (public)
+- `8081` - Stats API with health check endpoint (public)
 - `18789` - OpenClaw gateway (internal, localhost only)
 
 ## Troubleshooting
