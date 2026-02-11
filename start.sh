@@ -51,8 +51,8 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.channels.telegram = {
         enabled: true,
         botToken: process.env.TELEGRAM_BOT_TOKEN,
-        dmPolicy: 'pairing',
-        allowFrom: []
+        dmPolicy: 'open',
+        allowFrom: ['*']
       };
 
       // Write config
@@ -62,7 +62,7 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       const verify = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       if (verify.channels && verify.channels.telegram && verify.channels.telegram.enabled) {
         console.log('✅ Telegram channel enabled successfully');
-        console.log('   DM Policy: pairing');
+        console.log('   DM Policy: open (anyone can message)');
         console.log('   Bot Token: ' + process.env.TELEGRAM_BOT_TOKEN.substring(0, 10) + '...');
       } else {
         console.log('⚠️  WARNING: Telegram channel may not be enabled!');
@@ -78,7 +78,7 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
     exit 1
   fi
 
-  echo "🔐 Using secure pairing mode - first user will be auto-approved"
+  echo "🌐 Using open access mode - anyone can message your bot"
 
   # Run doctor to properly enable Telegram channel
   echo "🩺 Running openclaw doctor --fix to enable Telegram channel..."

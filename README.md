@@ -44,30 +44,38 @@ This template:
 - Clean installation, no TTY/wizard issues
 - Required dependencies: Node 22, Git, curl, ca-certificates
 
-## Bot Access - Auto-Approve First User
+## Bot Access - Open Mode
 
-This template uses a **secure auto-approval system**:
+This template uses **open access mode** for simplicity:
 
 ### How It Works
-1. ✅ **Bot deploys in secure pairing mode** - Unknown users must pair before chatting
-2. ✅ **Auto-approval activated from dashboard** - When deployment completes, auto-approval starts
-3. ✅ **First user is auto-approved** - When you send `/start`, you're instantly approved
-4. ✅ **Additional users require manual approval** - Others must be approved via dashboard
-
-### Security Benefits
-- 🔒 **Prevents API cost leaks** - Only approved users can use your bot
-- 🔒 **Zero friction UX** - Owner gets instant access
-- 🔒 **Granular control** - Manually approve family/team members via dashboard
+- ✅ **Bot accepts messages from anyone** - No pairing required
+- ✅ **Instant access** - Send `/start` and start chatting immediately
+- ✅ **Perfect for personal/testing use** - No manual approval needed
 
 ### What Happens
 ```
 1. Deploy bot → Wait 2-3 minutes for build & startup
-2. Dashboard detects "Active" status → Auto-approval starts automatically
-3. Go to Telegram and send /start to your bot
-4. Bot responds with "You've been paired!"
-5. Start chatting with your AI assistant!
-6. Dashboard shows notification: "First user auto-approved!"
+2. Go to Telegram and send /start to your bot
+3. Bot responds immediately
+4. Start chatting with your AI assistant!
 ```
+
+### Security Options
+
+**For production/restricted access**, you can switch to allowlist mode:
+
+1. Get your Telegram user ID (send a message to @userinfobot)
+2. In Railway, add environment variable:
+   ```
+   TELEGRAM_ALLOWLIST=123456789,987654321
+   ```
+3. Update the start.sh script to use `dmPolicy: 'allowlist'`
+
+**Or use pairing mode** for manual approval:
+- Set `dmPolicy: 'pairing'` in config
+- Users will receive pairing codes
+- Approve via: `openclaw pairing approve telegram <CODE>`
 
 ### Troubleshooting
 
@@ -75,17 +83,13 @@ This template uses a **secure auto-approval system**:
 - Wait 2-3 minutes after deployment for full startup
 - Check that bot token is correct (from @BotFather)
 - Verify agent status is "Active" in dashboard
-- Check Railway logs for errors
+- Check Railway logs for Telegram provider startup
+- Look for: `[telegram] [default] starting provider`
 
-**Bot says "Pairing required":**
-- Auto-approval may not have started - check dashboard
-- First user may have already been approved (you're the second user)
-- Check Railway logs for auto-approval status
-
-### For Additional Users
-Other users who message your bot will receive a pairing code. You can approve them via:
-1. Dashboard UI → Agent Details → Pairing tab
-2. Railway shell: `openclaw pairing approve telegram <CODE>`
+**Bot says "Access not configured":**
+- This means the gateway is using pairing/allowlist mode
+- Check that `dmPolicy: 'open'` is set in config
+- Run `openclaw doctor --fix` to apply config changes
 
 ## Ports
 
