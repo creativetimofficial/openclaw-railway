@@ -16,7 +16,7 @@ Optional:
 
 This template:
 
-1. **Installs OpenClaw** via npm (`npm install -g openclaw@latest`) - ~15s
+1. **Installs OpenClaw** via npm (`npm install -g openclaw@2026.2.9`) - ~15s
 2. **Runs non-interactive onboarding** (Docker mode - no systemd):
    ```bash
    openclaw onboard --non-interactive \
@@ -40,7 +40,7 @@ This template:
 ## Build Time
 
 - **30-45 seconds** total (vs 5+ minutes for source builds)
-- Uses official npm package: `openclaw@latest`
+- Uses official npm package: `openclaw@2026.2.9`
 - Clean installation, no TTY/wizard issues
 - Required dependencies: Node 22, Git, curl, ca-certificates
 

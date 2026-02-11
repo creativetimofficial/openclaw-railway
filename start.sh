@@ -67,12 +67,10 @@ export TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 echo "🔐 Starting Pairing Management API on port 8081..."
 node /app/pairing-api.js &
 
-# Start auto-approval monitor for first user
-echo "👀 Starting first-user auto-approval monitor..."
-node /app/auto-approve-first.js &
+# Note: Auto-approval monitor will be started by the UI dashboard after build completes
+echo "ℹ️  Pairing will be activated from dashboard after deployment completes"
 
 sleep 2
-echo "🤖 Telegram bot configured - first user will be auto-approved!"
 
 # Health check endpoint (runs in background)
 echo "🏥 Starting health check server on port 8080..."
