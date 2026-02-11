@@ -106,6 +106,31 @@ You can also access your agent via Telegram with **open access mode**:
 
 ## Troubleshooting
 
+### Gateway Crashes or Becomes Unresponsive
+
+If the OpenClaw gateway crashes (e.g., after config changes), you can restart it remotely using the **official OpenClaw graceful restart procedure**:
+
+**Via Dashboard:**
+1. Go to your agent's details page
+2. If there's a connection error, click **"Restart Gateway"** button
+3. Wait 5-10 seconds for gateway to restart
+4. Page will reload automatically
+
+**What happens behind the scenes:**
+- Sends SIGTERM signal for graceful shutdown (official OpenClaw method)
+- Waits for gateway to exit cleanly
+- Starts new gateway process
+- This is the same as running `kill -TERM <pid>` then `openclaw gateway --port 18789`
+
+**The gateway may crash when:**
+- Config changes require a restart (e.g., changing Telegram dmPolicy)
+- Shutdown times out during restart
+- Memory/resource issues
+
+**If restart doesn't work:**
+- Redeploy the agent from Railway dashboard
+- Check Railway logs for error messages
+
 ### Bot not responding
 - Check that `TELEGRAM_BOT_TOKEN` is set correctly
 - Verify token is from @BotFather

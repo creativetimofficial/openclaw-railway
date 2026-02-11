@@ -5,7 +5,7 @@
  */
 
 const http = require('http');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
@@ -303,6 +303,85 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // POST /restart-gateway - Restart the OpenClaw gateway
+  if (req.method === 'POST' && url.pathname === '/restart-gateway') {
+    try {
+      console.log('🔄 Restarting OpenClaw gateway using official method...');
+
+      // Step 1: Find gateway PID
+      let gatewayPid;
+      try {
+        const { stdout } = await execAsync('pgrep -f "openclaw gateway"');
+        gatewayPid = stdout.trim().split('\n')[0]; // Get first PID if multiple
+        console.log(`📍 Found gateway process: PID ${gatewayPid}`);
+      } catch (err) {
+        console.log('ℹ️  No gateway process found');
+        // Try to start gateway anyway
+        const gateway = spawn('openclaw', ['gateway', '--port', '18789'], {
+          detached: true,
+          stdio: 'inherit'
+        });
+        gateway.unref();
+        console.log('✅ Gateway started');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Gateway started (was not running)'
+        }));
+        return;
+      }
+
+      // Step 2: Send SIGTERM for graceful shutdown (official method)
+      console.log('📤 Sending SIGTERM for graceful shutdown...');
+      await execAsync(`kill -TERM ${gatewayPid}`);
+
+      // Step 3: Wait for process to exit gracefully (up to 10 seconds)
+      let attempts = 0;
+      while (attempts < 20) {
+        try {
+          await execAsync(`kill -0 ${gatewayPid}`); // Check if process exists
+          await new Promise(resolve => setTimeout(resolve, 500));
+          attempts++;
+        } catch {
+          // Process exited
+          console.log('✅ Gateway stopped gracefully');
+          break;
+        }
+      }
+
+      if (attempts >= 20) {
+        console.log('⚠️  Gateway did not exit gracefully, may need to wait longer');
+      }
+
+      // Step 4: Wait a moment for port to be released
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Step 5: Start new gateway process
+      console.log('🚀 Starting new gateway process...');
+      const gateway = spawn('openclaw', ['gateway', '--port', '18789'], {
+        detached: true,
+        stdio: 'inherit'
+      });
+      gateway.unref();
+
+      console.log('✅ Gateway restarted successfully');
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        message: 'Gateway restarted successfully using SIGTERM'
+      }));
+    } catch (error) {
+      console.error('❌ Failed to restart gateway:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: error.message
+      }));
+    }
+    return;
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
@@ -316,6 +395,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   `);
   console.log(`   Protected endpoints (require Bearer token):`);
   console.log(`   POST /chat - Chat with agent (proxies to gateway)`);
+  console.log(`   POST /restart-gateway - Restart gateway (recovery)`);
   console.log(`   GET  /stats/usage - Get usage and cost statistics`);
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
   console.log(`   GET  /stats/sessions - Get session list`);
