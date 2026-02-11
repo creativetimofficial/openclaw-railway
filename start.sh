@@ -52,10 +52,7 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
         enabled: true,
         botToken: process.env.TELEGRAM_BOT_TOKEN,
         dmPolicy: 'pairing',
-        allowFrom: [],
-        pairing: {
-          enabled: true
-        }
+        allowFrom: []
       };
 
       // Write config
