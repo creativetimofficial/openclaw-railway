@@ -63,27 +63,42 @@ The easiest way to interact with your agent is through the **dashboard chat inte
 - ✅ **Web-based** - Works on any device with a browser
 
 ### Telegram Access (Optional)
-You can also access your agent via Telegram with **open access mode**:
+You can also access your agent via Telegram with **pairing mode** (secure):
 
-- ✅ **Bot accepts messages from anyone** - No pairing required
-- ✅ **Instant access** - Send `/start` and start chatting immediately
-- ✅ **Perfect for mobile use** - Chat from anywhere
+- 🔒 **Manual approval required** - Users get a pairing code
+- 🔒 **You control access** - Approve only trusted users
+- ✅ **Perfect for mobile use** - Chat from anywhere after approval
+
+**How to approve Telegram users:**
+1. User sends `/start` to your bot
+2. Bot responds with a pairing code (e.g., "Pairing code: ABC123")
+3. You can approve via web chat: Ask the agent to "approve telegram pairing code ABC123"
+4. User can now chat with the bot
 
 ### Security Options
 
-**For production/restricted access**, you can switch to allowlist mode:
+**Current mode: Pairing (Secure by default)**
+- Users must be manually approved before chatting
+- Recommended for production use
 
+**Alternative modes:**
+
+**1. Allowlist Mode** (Pre-approved users only):
 1. Get your Telegram user ID (send a message to @userinfobot)
-2. In Railway, add environment variable:
+2. Edit `start.sh` to set:
+   ```javascript
+   dmPolicy: 'allowlist',
+   allowFrom: ['123456789', '987654321']
    ```
-   TELEGRAM_ALLOWLIST=123456789,987654321
-   ```
-3. Update the start.sh script to use `dmPolicy: 'allowlist'`
+3. Redeploy - only listed users can message the bot
 
-**Or use pairing mode** for manual approval:
-- Set `dmPolicy: 'pairing'` in config
-- Users will receive pairing codes
-- Approve via: `openclaw pairing approve telegram <CODE>`
+**2. Open Mode** (Anyone can message - not recommended):
+1. Edit `start.sh` to set:
+   ```javascript
+   dmPolicy: 'open',
+   allowFrom: ['*']
+   ```
+2. Redeploy - bot accepts messages from anyone
 
 ### Troubleshooting
 
@@ -143,7 +158,8 @@ If the OpenClaw gateway crashes (e.g., after config changes), you can restart it
 - Review deployment logs for startup errors
 - Verify OpenClaw gateway started successfully
 
-### Bot asks for pairing code
-- This should not happen with this template (open DM policy)
-- If it does, check logs to ensure DM policy was set correctly
-- Config file location: `/data/.openclaw/openclaw.json`
+### Bot asks for pairing code (Telegram)
+- **This is expected behavior** - the bot uses pairing mode by default
+- User gets a pairing code like: `Pairing code: ABC123`
+- **To approve:** Use the web chat interface and ask: "approve telegram pairing code ABC123"
+- Or check Railway logs to find the code and approve manually
