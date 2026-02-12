@@ -37,7 +37,12 @@ This template:
 6. **Starts API server** on port 8081:
    - `/health` - Health check endpoint
    - `/chat` - Chat proxy to gateway
-   - `/stats/*` - Usage statistics endpoints
+   - `/stats/usage` - Usage and cost statistics
+   - `/stats/logs` - Recent log entries
+   - `/stats/sessions` - Session list
+   - `/stats/activity` - Activity summary
+   - `/stats/cron` - Cron jobs list
+   - `/stats/skills` - Installed skills list
 
 ## Build Time
 
@@ -121,30 +126,32 @@ You can also access your agent via Telegram with **pairing mode** (secure):
 
 ## Troubleshooting
 
-### Gateway Crashes or Becomes Unresponsive
+### Service Crashes or Becomes Unresponsive
 
-If the OpenClaw gateway crashes (e.g., after config changes), you can restart it remotely using the **official OpenClaw graceful restart procedure**:
+If the OpenClaw service crashes or becomes unresponsive (e.g., gateway crash, memory issues):
 
 **Via Dashboard:**
 1. Go to your agent's details page
-2. If there's a connection error, click **"Restart Gateway"** button
-3. Wait 5-10 seconds for gateway to restart
-4. Page will reload automatically
+2. If there's a connection error, click **"Restart Service"** button
+3. Wait 1-2 minutes for Railway to redeploy the service
+4. Page will refresh automatically when service is back online
 
 **What happens behind the scenes:**
-- Sends SIGTERM signal for graceful shutdown (official OpenClaw method)
-- Waits for gateway to exit cleanly
-- Starts new gateway process
-- This is the same as running `kill -TERM <pid>` then `openclaw gateway --port 18789`
+- Triggers a Railway service redeploy via GraphQL API
+- Railway pulls latest code and redeploys the container
+- All environment variables and volumes are preserved
+- More reliable than internal restarts when gateway is crashed
 
-**The gateway may crash when:**
-- Config changes require a restart (e.g., changing Telegram dmPolicy)
-- Shutdown times out during restart
-- Memory/resource issues
+**The service may crash when:**
+- Gateway process crashes unexpectedly
+- Memory/resource limits exceeded
+- Config changes require full restart
+- Container becomes unhealthy
 
-**If restart doesn't work:**
-- Redeploy the agent from Railway dashboard
-- Check Railway logs for error messages
+**Why Railway restart instead of internal gateway restart:**
+- When gateway crashes, internal HTTP endpoints become inaccessible
+- Railway service restart works even when gateway is completely down
+- Guaranteed clean restart with fresh container state
 
 ### Bot not responding
 - Check that `TELEGRAM_BOT_TOKEN` is set correctly

@@ -198,6 +198,42 @@ async function getActivitySummary() {
 }
 
 /**
+ * Get cron jobs list
+ */
+async function getCronJobs() {
+  try {
+    const { stdout } = await execAsync('openclaw cron list --json');
+    const jobs = JSON.parse(stdout);
+    return {
+      success: true,
+      jobs: Array.isArray(jobs) ? jobs : [],
+      total: Array.isArray(jobs) ? jobs.length : 0
+    };
+  } catch (error) {
+    console.error('Failed to get cron jobs:', error.message);
+    return { success: true, jobs: [], total: 0 };
+  }
+}
+
+/**
+ * Get installed skills list
+ */
+async function getSkillsList() {
+  try {
+    const { stdout } = await execAsync('openclaw skills list --json');
+    const skills = JSON.parse(stdout);
+    return {
+      success: true,
+      skills: Array.isArray(skills) ? skills : [],
+      total: Array.isArray(skills) ? skills.length : 0
+    };
+  } catch (error) {
+    console.error('Failed to get skills:', error.message);
+    return { success: true, skills: [], total: 0 };
+  }
+}
+
+/**
  * Simple HTTP server
  */
 const server = http.createServer(async (req, res) => {
@@ -303,82 +339,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /restart-gateway - Restart the OpenClaw gateway
-  if (req.method === 'POST' && url.pathname === '/restart-gateway') {
-    try {
-      console.log('🔄 Restarting OpenClaw gateway using official method...');
+  // GET /stats/cron - Get cron jobs list
+  if (req.method === 'GET' && url.pathname === '/stats/cron') {
+    const result = await getCronJobs();
+    res.writeHead(result.success ? 200 : 500, {
+      'Content-Type': 'application/json'
+    });
+    res.end(JSON.stringify(result));
+    return;
+  }
 
-      // Step 1: Find gateway PID
-      let gatewayPid;
-      try {
-        const { stdout } = await execAsync('pgrep -f "openclaw gateway"');
-        gatewayPid = stdout.trim().split('\n')[0]; // Get first PID if multiple
-        console.log(`📍 Found gateway process: PID ${gatewayPid}`);
-      } catch (err) {
-        console.log('ℹ️  No gateway process found');
-        // Try to start gateway anyway
-        const gateway = spawn('openclaw', ['gateway', '--port', '18789'], {
-          detached: true,
-          stdio: 'inherit'
-        });
-        gateway.unref();
-        console.log('✅ Gateway started');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: true,
-          message: 'Gateway started (was not running)'
-        }));
-        return;
-      }
-
-      // Step 2: Send SIGTERM for graceful shutdown (official method)
-      console.log('📤 Sending SIGTERM for graceful shutdown...');
-      await execAsync(`kill -TERM ${gatewayPid}`);
-
-      // Step 3: Wait for process to exit gracefully (up to 10 seconds)
-      let attempts = 0;
-      while (attempts < 20) {
-        try {
-          await execAsync(`kill -0 ${gatewayPid}`); // Check if process exists
-          await new Promise(resolve => setTimeout(resolve, 500));
-          attempts++;
-        } catch {
-          // Process exited
-          console.log('✅ Gateway stopped gracefully');
-          break;
-        }
-      }
-
-      if (attempts >= 20) {
-        console.log('⚠️  Gateway did not exit gracefully, may need to wait longer');
-      }
-
-      // Step 4: Wait a moment for port to be released
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Step 5: Start new gateway process
-      console.log('🚀 Starting new gateway process...');
-      const gateway = spawn('openclaw', ['gateway', '--port', '18789'], {
-        detached: true,
-        stdio: 'inherit'
-      });
-      gateway.unref();
-
-      console.log('✅ Gateway restarted successfully');
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        message: 'Gateway restarted successfully using SIGTERM'
-      }));
-    } catch (error) {
-      console.error('❌ Failed to restart gateway:', error);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: false,
-        error: error.message
-      }));
-    }
+  // GET /stats/skills - Get installed skills list
+  if (req.method === 'GET' && url.pathname === '/stats/skills') {
+    const result = await getSkillsList();
+    res.writeHead(result.success ? 200 : 500, {
+      'Content-Type': 'application/json'
+    });
+    res.end(JSON.stringify(result));
     return;
   }
 
@@ -395,11 +372,12 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   `);
   console.log(`   Protected endpoints (require Bearer token):`);
   console.log(`   POST /chat - Chat with agent (proxies to gateway)`);
-  console.log(`   POST /restart-gateway - Restart gateway (recovery)`);
   console.log(`   GET  /stats/usage - Get usage and cost statistics`);
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
   console.log(`   GET  /stats/sessions - Get session list`);
   console.log(`   GET  /stats/activity - Get activity summary`);
+  console.log(`   GET  /stats/cron - Get cron jobs list`);
+  console.log(`   GET  /stats/skills - Get installed skills list`);
   console.log(`   `);
   console.log(`   Auth: Bearer ${API_SECRET.substring(0, 10)}...`);
 });
