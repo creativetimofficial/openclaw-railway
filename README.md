@@ -50,7 +50,8 @@ This template:
    - Prevents parallel `openclaw status --json` executions that cause crashes
    - Conservative buffer limits: 5MB (status), 2MB (logs/usage)
    - 10-second timeouts on all commands to prevent hanging
-   - Skills endpoint reads only from config file (never calls status)
+   - Skills endpoint uses cached status (safe with locking), falls back to config file
+   - Sessions, cron, and skills all share the same cached status data
 
 ## Build Time
 

@@ -368,39 +368,107 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list from config file only
- * Avoids calling status/skills commands which can dump massive data
+ * Get installed skills list from cached status
+ * Safe to use cached status now that we have proper locking
  */
 async function getSkillsList() {
   try {
     let skillsData = null;
+    let sourceLocation = 'unknown';
 
-    // Read from openclaw.json config file
+    // Method 1: Try to get skills from cached status (safe with locking)
     try {
-      const configPath = path.join(STATE_DIR, 'openclaw.json');
-      const configContent = await fs.readFile(configPath, 'utf8');
-      const config = JSON.parse(configContent);
+      const status = await getCachedStatus();
 
-      if (config.skills && Array.isArray(config.skills)) {
-        skillsData = config.skills;
+      // Log the top-level keys to help debug
+      console.log('📊 Status object keys:', Object.keys(status).join(', '));
+
+      // Try multiple possible locations where skills might be stored
+      if (status.skills && Array.isArray(status.skills)) {
+        skillsData = status.skills;
+        sourceLocation = 'status.skills';
+      } else if (status.skills && typeof status.skills === 'object') {
+        // skills might be an object with sub-properties
+        if (status.skills.eligible && Array.isArray(status.skills.eligible)) {
+          skillsData = status.skills.eligible;
+          sourceLocation = 'status.skills.eligible';
+        } else if (status.skills.all && Array.isArray(status.skills.all)) {
+          skillsData = status.skills.all;
+          sourceLocation = 'status.skills.all';
+        } else if (status.skills.registry && Array.isArray(status.skills.registry)) {
+          skillsData = status.skills.registry;
+          sourceLocation = 'status.skills.registry';
+        }
+      } else if (status.registry && status.registry.skills && Array.isArray(status.registry.skills)) {
+        skillsData = status.registry.skills;
+        sourceLocation = 'status.registry.skills';
+      } else if (status.extensions && Array.isArray(status.extensions)) {
+        skillsData = status.extensions;
+        sourceLocation = 'status.extensions';
+      } else if (status.tools && Array.isArray(status.tools)) {
+        skillsData = status.tools;
+        sourceLocation = 'status.tools';
       }
-    } catch (configError) {
-      console.error('Failed to read config for skills:', configError.message);
-      // Return empty list instead of failing
-      return { success: true, skills: [], total: 0 };
+
+      if (skillsData) {
+        console.log(`✅ Found ${skillsData.length} skills in ${sourceLocation}`);
+      } else {
+        console.log('⚠️  No skills array found in status object');
+      }
+    } catch (statusError) {
+      console.error('Failed to get cached status for skills:', statusError.message);
     }
 
-    // Parse skills data
+    // Method 2: Fallback to config file if status doesn't have skills
+    if (!skillsData) {
+      try {
+        const configPath = path.join(STATE_DIR, 'openclaw.json');
+        const configContent = await fs.readFile(configPath, 'utf8');
+        const config = JSON.parse(configContent);
+
+        console.log('📊 Config object keys:', Object.keys(config).join(', '));
+
+        if (config.skills && Array.isArray(config.skills)) {
+          skillsData = config.skills;
+          sourceLocation = 'config.skills';
+        } else if (config.skills && typeof config.skills === 'object' && config.skills.entries) {
+          // Skills might be in config.skills.entries as an object
+          skillsData = Object.entries(config.skills.entries).map(([name, data]) => ({
+            name,
+            ...data
+          }));
+          sourceLocation = 'config.skills.entries';
+        } else if (config.registry && config.registry.skills && Array.isArray(config.registry.skills)) {
+          skillsData = config.registry.skills;
+          sourceLocation = 'config.registry.skills';
+        }
+
+        if (skillsData) {
+          console.log(`✅ Found ${skillsData.length} skills in ${sourceLocation}`);
+        } else {
+          console.log('⚠️  No skills found in config file');
+        }
+      } catch (configError) {
+        console.error('Failed to read config for skills:', configError.message);
+      }
+    }
+
+    // Parse skills data if found
     if (skillsData && Array.isArray(skillsData)) {
       const skills = skillsData
-        .filter(s => s.eligible || s.bundled) // Only show eligible or bundled skills
+        .filter(s => {
+          // Filter for eligible or bundled skills
+          return s.eligible === true || s.bundled === true || s.enabled === true;
+        })
         .map(s => ({
-          name: s.name,
+          name: s.name || s.skillName || 'Unknown',
           version: s.version || null,
-          enabled: s.eligible === true,
-          description: s.description || null,
+          enabled: s.eligible === true || s.enabled === true,
+          description: s.description || s.summary || null,
           emoji: s.emoji || null
         }));
+
+      console.log(`📋 Returning ${skills.length} eligible/enabled skills`);
 
       return {
         success: true,
@@ -409,6 +477,7 @@ async function getSkillsList() {
       };
     }
 
+    console.log('❌ No skills data found anywhere');
     return { success: true, skills: [], total: 0 };
   } catch (error) {
     console.error('Failed to get skills:', error.message);
