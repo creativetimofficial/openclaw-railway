@@ -108,85 +108,74 @@ async function getRecentLogs(limit = 100) {
 }
 
 /**
- * Get session list and activity
+ * Get session list using official OpenClaw command
  */
 async function getSessionStats() {
   try {
-    // Try to find sessions directory
-    const sessionsDir = path.join(STATE_DIR, 'sessions');
+    const { stdout } = await execAsync('openclaw sessions --json');
+    const sessions = JSON.parse(stdout);
 
-    try {
-      const sessions = await fs.readdir(sessionsDir);
-      const sessionData = [];
-
-      for (const sessionId of sessions.slice(0, 20)) { // Limit to 20 most recent
-        try {
-          const sessionPath = path.join(sessionsDir, sessionId);
-          const stats = await fs.stat(sessionPath);
-
-          // Try to read session metadata if it exists
-          let metadata = { id: sessionId, updatedAt: stats.mtime };
-          try {
-            const metaPath = path.join(sessionPath, 'metadata.json');
-            const metaContent = await fs.readFile(metaPath, 'utf8');
-            metadata = { ...metadata, ...JSON.parse(metaContent) };
-          } catch {
-            // No metadata file, use defaults
-          }
-
-          sessionData.push(metadata);
-        } catch (err) {
-          console.error(`Error reading session ${sessionId}:`, err.message);
-        }
-      }
-
-      return {
-        success: true,
-        sessions: sessionData,
-        total: sessions.length
-      };
-    } catch (error) {
-      // Sessions directory doesn't exist yet
-      return {
-        success: true,
-        sessions: [],
-        total: 0
-      };
-    }
+    return {
+      success: true,
+      sessions: Array.isArray(sessions) ? sessions : [],
+      total: Array.isArray(sessions) ? sessions.length : 0
+    };
   } catch (error) {
     console.error('Failed to get session stats:', error.message);
-    return { success: false, error: error.message, sessions: [], total: 0 };
+    return { success: true, sessions: [], total: 0 };
   }
 }
 
 /**
- * Get activity summary
+ * Get activity summary by parsing recent logs
+ * Note: OpenClaw doesn't have a direct API for message/tool call counts,
+ * so we parse logs to derive activity metrics
  */
 async function getActivitySummary() {
   try {
-    // Get recent logs for activity
-    const logsResult = await getRecentLogs(50);
+    const logsResult = await getRecentLogs(100);
     const logs = logsResult.logs || [];
 
-    // Count different activity types
-    const activity = {
-      messages: 0,
-      toolCalls: 0,
-      errors: 0,
-      lastActivity: null
-    };
+    let totalMessages = 0;
+    let totalToolCalls = 0;
+    let totalErrors = 0;
+    let lastActivity = null;
 
     logs.forEach(log => {
-      if (log.level === 'error') activity.errors++;
-      if (log.message && log.message.includes('tool')) activity.toolCalls++;
-      if (log.message && log.message.includes('message')) activity.messages++;
+      // Count errors
+      if (log.level === 'error') {
+        totalErrors++;
+      }
 
-      if (!activity.lastActivity && log.timestamp) {
-        activity.lastActivity = log.timestamp;
+      // Count tool calls (look for tool-related log messages)
+      if (log.message) {
+        const msg = log.message.toLowerCase();
+        if (msg.includes('tool') || msg.includes('function call') || msg.includes('executing')) {
+          totalToolCalls++;
+        }
+        // Count messages (look for message-related log entries)
+        if (msg.includes('message') || msg.includes('chat') || msg.includes('response')) {
+          totalMessages++;
+        }
+      }
+
+      // Track last activity timestamp
+      if (log.timestamp) {
+        if (!lastActivity || log.timestamp > lastActivity) {
+          lastActivity = log.timestamp;
+        }
       }
     });
 
-    return { success: true, activity };
+    return {
+      success: true,
+      activity: {
+        messages: totalMessages,
+        toolCalls: totalToolCalls,
+        errors: totalErrors,
+        lastActivity
+      }
+    };
   } catch (error) {
     console.error('Failed to get activity summary:', error.message);
     return {
@@ -198,16 +187,63 @@ async function getActivitySummary() {
 }
 
 /**
- * Get cron jobs list
+ * Get cron jobs list by parsing openclaw.json config file
  */
 async function getCronJobs() {
   try {
-    const { stdout } = await execAsync('openclaw cron list --json');
-    const jobs = JSON.parse(stdout);
+    // Read the openclaw.json config file
+    const configPath = path.join(STATE_DIR, 'openclaw.json');
+    const configContent = await fs.readFile(configPath, 'utf8');
+    const config = JSON.parse(configContent);
+
+    const jobs = [];
+
+    // Check for heartbeat configuration (special cron-like task)
+    if (config.heartbeat && config.heartbeat.agents) {
+      config.heartbeat.agents.forEach(agent => {
+        jobs.push({
+          id: `heartbeat-${agent.agentId}`,
+          name: `Heartbeat: ${agent.agentId}`,
+          schedule: agent.every || 'unknown',
+          enabled: agent.enabled !== false,
+          lastRun: null,
+          nextRun: null
+        });
+      });
+    }
+
+    // Check for cron configuration (if exists in config)
+    if (config.cron && Array.isArray(config.cron)) {
+      config.cron.forEach((job, index) => {
+        jobs.push({
+          id: job.id || `cron-${index}`,
+          name: job.name || job.description || `Cron job ${index + 1}`,
+          schedule: job.schedule || job.cron || 'unknown',
+          enabled: job.enabled !== false,
+          lastRun: job.lastRun || null,
+          nextRun: job.nextRun || null
+        });
+      });
+    }
+
+    // Alternative: check for jobs array (alternative config structure)
+    if (config.jobs && Array.isArray(config.jobs)) {
+      config.jobs.forEach((job, index) => {
+        jobs.push({
+          id: job.id || `job-${index}`,
+          name: job.name || job.description || `Job ${index + 1}`,
+          schedule: job.schedule || job.cron || job.every || 'unknown',
+          enabled: job.enabled !== false,
+          lastRun: job.lastRun || null,
+          nextRun: job.nextRun || null
+        });
+      });
+    }
+
     return {
       success: true,
-      jobs: Array.isArray(jobs) ? jobs : [],
-      total: Array.isArray(jobs) ? jobs.length : 0
+      jobs,
+      total: jobs.length
     };
   } catch (error) {
     console.error('Failed to get cron jobs:', error.message);
@@ -216,17 +252,45 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list
+ * Get installed skills list using official OpenClaw command
  */
 async function getSkillsList() {
   try {
-    const { stdout } = await execAsync('openclaw skills list --json');
-    const skills = JSON.parse(stdout);
-    return {
-      success: true,
-      skills: Array.isArray(skills) ? skills : [],
-      total: Array.isArray(skills) ? skills.length : 0
-    };
+    // Try with --json flag first
+    try {
+      const { stdout } = await execAsync('openclaw skills list --json');
+      const skills = JSON.parse(stdout);
+      return {
+        success: true,
+        skills: Array.isArray(skills) ? skills : [],
+        total: Array.isArray(skills) ? skills.length : 0
+      };
+    } catch (jsonError) {
+      // If --json flag not supported, parse plain text output
+      const { stdout } = await execAsync('openclaw skills list');
+      const skills = [];
+
+      // Parse plain text output (format: "1. 🛡️ healthcheck — Description")
+      const lines = stdout.trim().split('\n');
+      lines.forEach(line => {
+        // Match pattern: number. emoji name — description
+        const match = line.match(/^\d+\.\s+(?:[\u{1F300}-\u{1F9FF}]\s+)?(.+?)\s+—\s+(.+)$/u);
+        if (match) {
+          skills.push({
+            name: match[1].trim(),
+            version: null,
+            enabled: true,
+            description: match[2].trim()
+          });
+        }
+      });
+
+      return {
+        success: true,
+        skills,
+        total: skills.length
+      };
+    }
   } catch (error) {
     console.error('Failed to get skills:', error.message);
     return { success: true, skills: [], total: 0 };
