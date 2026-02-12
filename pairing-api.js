@@ -108,18 +108,33 @@ async function getRecentLogs(limit = 100) {
 }
 
 /**
- * Get session list using official OpenClaw command
+ * Get session list using OpenClaw status (sessions command returns empty)
  */
 async function getSessionStats() {
   try {
-    const { stdout } = await execAsync('openclaw sessions --json');
-    const sessions = JSON.parse(stdout);
+    // The sessions command returns empty, so use status --json instead
+    const { stdout } = await execAsync('openclaw status --json');
+    const status = JSON.parse(stdout);
 
-    return {
-      success: true,
-      sessions: Array.isArray(sessions) ? sessions : [],
-      total: Array.isArray(sessions) ? sessions.length : 0
-    };
+    if (status && status.sessions && status.sessions.recent) {
+      const sessions = status.sessions.recent.map(s => ({
+        id: s.sessionId || s.key,
+        key: s.key,
+        agentId: s.agentId,
+        updatedAt: new Date(s.updatedAt).toISOString(),
+        messageCount: s.inputTokens + s.outputTokens || 0,
+        model: s.model,
+        totalTokens: s.totalTokens
+      }));
+
+      return {
+        success: true,
+        sessions,
+        total: status.sessions.count || sessions.length
+      };
+    }
+
+    return { success: true, sessions: [], total: 0 };
   } catch (error) {
     console.error('Failed to get session stats:', error.message);
     return { success: true, sessions: [], total: 0 };
@@ -187,57 +202,77 @@ async function getActivitySummary() {
 }
 
 /**
- * Get cron jobs list by parsing openclaw.json config file
+ * Get cron jobs list from OpenClaw status and config
  */
 async function getCronJobs() {
   try {
-    // Read the openclaw.json config file
-    const configPath = path.join(STATE_DIR, 'openclaw.json');
-    const configContent = await fs.readFile(configPath, 'utf8');
-    const config = JSON.parse(configContent);
-
     const jobs = [];
 
-    // Check for heartbeat configuration (special cron-like task)
-    if (config.heartbeat && config.heartbeat.agents) {
-      config.heartbeat.agents.forEach(agent => {
-        jobs.push({
-          id: `heartbeat-${agent.agentId}`,
-          name: `Heartbeat: ${agent.agentId}`,
-          schedule: agent.every || 'unknown',
-          enabled: agent.enabled !== false,
-          lastRun: null,
-          nextRun: null
+    // Method 1: Get from status output (most reliable)
+    try {
+      const { stdout } = await execAsync('openclaw status --json');
+      const status = JSON.parse(stdout);
+
+      // Check heartbeat configuration
+      if (status.heartbeat && status.heartbeat.agents) {
+        status.heartbeat.agents.forEach(agent => {
+          jobs.push({
+            id: `heartbeat-${agent.agentId}`,
+            name: `Heartbeat: ${agent.agentId}`,
+            schedule: agent.every || 'unknown',
+            enabled: agent.enabled !== false,
+            lastRun: null,
+            nextRun: null
+          });
         });
-      });
+      }
+    } catch (statusError) {
+      console.error('Failed to get status for cron:', statusError.message);
     }
 
-    // Check for cron configuration (if exists in config)
-    if (config.cron && Array.isArray(config.cron)) {
-      config.cron.forEach((job, index) => {
-        jobs.push({
-          id: job.id || `cron-${index}`,
-          name: job.name || job.description || `Cron job ${index + 1}`,
-          schedule: job.schedule || job.cron || 'unknown',
-          enabled: job.enabled !== false,
-          lastRun: job.lastRun || null,
-          nextRun: job.nextRun || null
+    // Method 2: Read cron jobs from the cron jobs file
+    try {
+      const cronPath = path.join(STATE_DIR, 'cron', 'jobs.json');
+      const cronContent = await fs.readFile(cronPath, 'utf8');
+      const cronData = JSON.parse(cronContent);
+
+      if (cronData.jobs && Array.isArray(cronData.jobs)) {
+        cronData.jobs.forEach(job => {
+          jobs.push({
+            id: job.id || `cron-${job.name}`,
+            name: job.name || job.description || 'Cron job',
+            schedule: job.schedule || job.cron || 'unknown',
+            enabled: job.enabled !== false,
+            lastRun: job.lastRun || null,
+            nextRun: job.nextRun || null
+          });
         });
-      });
+      }
+    } catch (cronError) {
+      // Cron file doesn't exist yet - that's OK
     }
 
-    // Alternative: check for jobs array (alternative config structure)
-    if (config.jobs && Array.isArray(config.jobs)) {
-      config.jobs.forEach((job, index) => {
-        jobs.push({
-          id: job.id || `job-${index}`,
-          name: job.name || job.description || `Job ${index + 1}`,
-          schedule: job.schedule || job.cron || job.every || 'unknown',
-          enabled: job.enabled !== false,
-          lastRun: job.lastRun || null,
-          nextRun: job.nextRun || null
+    // Method 3: Read from openclaw.json config (fallback)
+    try {
+      const configPath = path.join(STATE_DIR, 'openclaw.json');
+      const configContent = await fs.readFile(configPath, 'utf8');
+      const config = JSON.parse(configContent);
+
+      // Only add if we haven't already found heartbeat jobs
+      if (jobs.length === 0 && config.heartbeat && config.heartbeat.agents) {
+        config.heartbeat.agents.forEach(agent => {
+          jobs.push({
+            id: `heartbeat-${agent.agentId}`,
+            name: `Heartbeat: ${agent.agentId}`,
+            schedule: agent.every || 'unknown',
+            enabled: agent.enabled !== false,
+            lastRun: null,
+            nextRun: null
+          });
         });
-      });
+      }
+    } catch (configError) {
+      console.error('Failed to read config for cron:', configError.message);
     }
 
     return {
@@ -252,38 +287,60 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list using official OpenClaw command
+ * Get installed skills list from OpenClaw status
  */
 async function getSkillsList() {
   try {
-    // Try with --json flag first
-    try {
-      const { stdout } = await execAsync('openclaw skills list --json');
-      const skills = JSON.parse(stdout);
-      return {
-        success: true,
-        skills: Array.isArray(skills) ? skills : [],
-        total: Array.isArray(skills) ? skills.length : 0
-      };
-    } catch (jsonError) {
-      // If --json flag not supported, parse plain text output
-      const { stdout } = await execAsync('openclaw skills list');
-      const skills = [];
+    // Get skills from status output (most reliable source)
+    const { stdout, stderr } = await execAsync('openclaw status --json');
 
-      // Parse plain text output (format: "1. 🛡️ healthcheck — Description")
-      const lines = stdout.trim().split('\n');
-      lines.forEach(line => {
-        // Match pattern: number. emoji name — description
-        const match = line.match(/^\d+\.\s+(?:[\u{1F300}-\u{1F9FF}]\s+)?(.+?)\s+—\s+(.+)$/u);
-        if (match) {
-          skills.push({
-            name: match[1].trim(),
-            version: null,
-            enabled: true,
-            description: match[2].trim()
-          });
+    // Skills data might be in stderr (check logs)
+    let skillsData = null;
+
+    // Try parsing stderr first (skills data is logged there)
+    if (stderr) {
+      const lines = stderr.split('\n');
+      for (const line of lines) {
+        if (line.includes('"skills":')) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.skills) {
+              skillsData = parsed.skills;
+              break;
+            }
+          } catch {}
         }
-      });
+      }
+    }
+
+    // If not in stderr, check if skills list outputs to stdout
+    if (!skillsData) {
+      try {
+        const { stdout: skillsStdout, stderr: skillsStderr } = await execAsync('openclaw skills list 2>&1');
+        const output = skillsStdout + skillsStderr;
+
+        // Check if output contains JSON
+        if (output.includes('"skills":')) {
+          const jsonMatch = output.match(/\{[^]*"skills"[^]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            skillsData = parsed.skills;
+          }
+        }
+      } catch {}
+    }
+
+    // Parse skills data
+    if (skillsData && Array.isArray(skillsData)) {
+      const skills = skillsData
+        .filter(s => s.eligible || s.bundled) // Only show eligible or bundled skills
+        .map(s => ({
+          name: s.name,
+          version: s.version || null,
+          enabled: s.eligible === true,
+          description: s.description || null,
+          emoji: s.emoji || null
+        }));
 
       return {
         success: true,
@@ -291,6 +348,8 @@ async function getSkillsList() {
         total: skills.length
       };
     }
+
+    return { success: true, skills: [], total: 0 };
   } catch (error) {
     console.error('Failed to get skills:', error.message);
     return { success: true, skills: [], total: 0 };
