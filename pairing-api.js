@@ -17,6 +17,49 @@ const STATE_DIR = process.env.OPENCLAW_STATE_DIR || '/data/.openclaw';
 const GATEWAY_URL = 'http://127.0.0.1:18789';
 
 /**
+ * Status Cache - Prevents memory overflow from parallel requests
+ */
+let cachedStatus = null;
+let statusCacheTimestamp = 0;
+const STATUS_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Get OpenClaw status with caching to prevent memory overflow
+ * This reduces multiple parallel `openclaw status --json` calls to a single cached call
+ */
+async function getCachedStatus() {
+  const now = Date.now();
+
+  // Return cached status if still valid
+  if (cachedStatus && (now - statusCacheTimestamp) < STATUS_CACHE_TTL) {
+    const age = Math.round((now - statusCacheTimestamp) / 1000);
+    console.log(`📦 Using cached status (age: ${age}s)`);
+    return cachedStatus;
+  }
+
+  console.log('🔄 Fetching fresh status from OpenClaw...');
+
+  try {
+    const { stdout } = await execAsync('openclaw status --json', {
+      maxBuffer: 10 * 1024 * 1024, // 10MB max buffer to prevent memory overflow
+      timeout: 15000 // 15 second timeout
+    });
+    cachedStatus = JSON.parse(stdout);
+    statusCacheTimestamp = now;
+    console.log('✅ Status cached successfully');
+    return cachedStatus;
+  } catch (error) {
+    console.error('❌ Failed to get status:', error.message);
+    // If we have old cached data, return it despite being stale
+    if (cachedStatus) {
+      console.log('⚠️  Returning stale cached status due to error');
+      return cachedStatus;
+    }
+    throw error;
+  }
+}
+
+/**
  * Chat Proxy Functions
  */
 
@@ -77,7 +120,10 @@ async function proxyChatRequest(body, isStreaming = false) {
  */
 async function getUsageStats() {
   try {
-    const { stdout } = await execAsync('openclaw status --usage --json');
+    const { stdout } = await execAsync('openclaw status --usage --json', {
+      maxBuffer: 5 * 1024 * 1024, // 5MB max buffer
+      timeout: 15000 // 15 second timeout
+    });
     const data = JSON.parse(stdout);
     return { success: true, data };
   } catch (error) {
@@ -91,7 +137,10 @@ async function getUsageStats() {
  */
 async function getRecentLogs(limit = 100) {
   try {
-    const { stdout } = await execAsync(`openclaw logs --json --limit ${limit}`);
+    const { stdout } = await execAsync(`openclaw logs --json --limit ${limit}`, {
+      maxBuffer: 5 * 1024 * 1024, // 5MB max buffer
+      timeout: 15000 // 15 second timeout
+    });
     const lines = stdout.trim().split('\n').filter(line => line);
     const logs = lines.map(line => {
       try {
@@ -108,13 +157,12 @@ async function getRecentLogs(limit = 100) {
 }
 
 /**
- * Get session list using OpenClaw status (sessions command returns empty)
+ * Get session list using cached OpenClaw status
  */
 async function getSessionStats() {
   try {
-    // The sessions command returns empty, so use status --json instead
-    const { stdout } = await execAsync('openclaw status --json');
-    const status = JSON.parse(stdout);
+    // Use cached status to avoid parallel executions
+    const status = await getCachedStatus();
 
     if (status && status.sessions && status.sessions.recent) {
       const sessions = status.sessions.recent.map(s => ({
@@ -202,16 +250,15 @@ async function getActivitySummary() {
 }
 
 /**
- * Get cron jobs list from OpenClaw status and config
+ * Get cron jobs list from cached OpenClaw status and config files
  */
 async function getCronJobs() {
   try {
     const jobs = [];
 
-    // Method 1: Get from status output (most reliable)
+    // Method 1: Get from cached status (most reliable, prevents memory overflow)
     try {
-      const { stdout } = await execAsync('openclaw status --json');
-      const status = JSON.parse(stdout);
+      const status = await getCachedStatus();
 
       // Check heartbeat configuration
       if (status.heartbeat && status.heartbeat.agents) {
@@ -227,7 +274,7 @@ async function getCronJobs() {
         });
       }
     } catch (statusError) {
-      console.error('Failed to get status for cron:', statusError.message);
+      console.error('Failed to get cached status for cron:', statusError.message);
     }
 
     // Method 2: Read cron jobs from the cron jobs file
@@ -287,47 +334,36 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list from OpenClaw status
+ * Get installed skills list from cached status or config
+ * Avoids calling `openclaw skills list` which dumps massive data to stdout
  */
 async function getSkillsList() {
   try {
-    // Get skills from status output (most reliable source)
-    const { stdout, stderr } = await execAsync('openclaw status --json');
-
-    // Skills data might be in stderr (check logs)
     let skillsData = null;
 
-    // Try parsing stderr first (skills data is logged there)
-    if (stderr) {
-      const lines = stderr.split('\n');
-      for (const line of lines) {
-        if (line.includes('"skills":')) {
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.skills) {
-              skillsData = parsed.skills;
-              break;
-            }
-          } catch {}
-        }
+    // Method 1: Try to get skills from cached status
+    try {
+      const status = await getCachedStatus();
+      if (status && status.skills && Array.isArray(status.skills)) {
+        skillsData = status.skills;
       }
+    } catch (statusError) {
+      console.error('Failed to get cached status for skills:', statusError.message);
     }
 
-    // If not in stderr, check if skills list outputs to stdout
+    // Method 2: Read from openclaw.json config (fallback)
     if (!skillsData) {
       try {
-        const { stdout: skillsStdout, stderr: skillsStderr } = await execAsync('openclaw skills list 2>&1');
-        const output = skillsStdout + skillsStderr;
+        const configPath = path.join(STATE_DIR, 'openclaw.json');
+        const configContent = await fs.readFile(configPath, 'utf8');
+        const config = JSON.parse(configContent);
 
-        // Check if output contains JSON
-        if (output.includes('"skills":')) {
-          const jsonMatch = output.match(/\{[^]*"skills"[^]*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            skillsData = parsed.skills;
-          }
+        if (config.skills && Array.isArray(config.skills)) {
+          skillsData = config.skills;
         }
-      } catch {}
+      } catch (configError) {
+        console.error('Failed to read config for skills:', configError.message);
+      }
     }
 
     // Parse skills data
@@ -497,10 +533,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   POST /chat - Chat with agent (proxies to gateway)`);
   console.log(`   GET  /stats/usage - Get usage and cost statistics`);
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
-  console.log(`   GET  /stats/sessions - Get session list`);
+  console.log(`   GET  /stats/sessions - Get session list (cached)`);
   console.log(`   GET  /stats/activity - Get activity summary`);
-  console.log(`   GET  /stats/cron - Get cron jobs list`);
-  console.log(`   GET  /stats/skills - Get installed skills list`);
+  console.log(`   GET  /stats/cron - Get cron jobs list (cached)`);
+  console.log(`   GET  /stats/skills - Get installed skills list (cached)`);
+  console.log(`   `);
+  console.log(`   💾 Status caching enabled (TTL: ${STATUS_CACHE_TTL / 1000}s) to prevent memory overflow`);
+  console.log(`   🛡️  Max buffer limits: 10MB (status), 5MB (logs/usage)`);
   console.log(`   `);
   console.log(`   Auth: Bearer ${API_SECRET.substring(0, 10)}...`);
 });

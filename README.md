@@ -39,10 +39,16 @@ This template:
    - `/chat` - Chat proxy to gateway
    - `/stats/usage` - Usage and cost statistics
    - `/stats/logs` - Recent log entries
-   - `/stats/sessions` - Session list
+   - `/stats/sessions` - Session list (cached)
    - `/stats/activity` - Activity summary
-   - `/stats/cron` - Cron jobs list
-   - `/stats/skills` - Installed skills list
+   - `/stats/cron` - Cron jobs list (cached)
+   - `/stats/skills` - Installed skills list (cached)
+
+   **Memory Optimization:**
+   - Status data is cached for 30 seconds to prevent memory overflow
+   - Multiple parallel requests share the same cached data
+   - Prevents 1.5GB stdout dumps from overwhelming 2GB Railway instances
+   - Max buffer limited to 10MB for status calls, 5MB for logs/usage
 
 ## Build Time
 
