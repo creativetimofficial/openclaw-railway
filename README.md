@@ -45,10 +45,12 @@ This template:
    - `/stats/skills` - Installed skills list (cached)
 
    **Memory Optimization:**
-   - Status data is cached for 30 seconds to prevent memory overflow
-   - Multiple parallel requests share the same cached data
-   - Prevents 1.5GB stdout dumps from overwhelming 2GB Railway instances
-   - Max buffer limited to 10MB for status calls, 5MB for logs/usage
+   - Status data is cached for 30 seconds with request locking
+   - Only ONE request fetches status at a time, others wait for result
+   - Prevents parallel `openclaw status --json` executions that cause crashes
+   - Conservative buffer limits: 5MB (status), 2MB (logs/usage)
+   - 10-second timeouts on all commands to prevent hanging
+   - Skills endpoint reads only from config file (never calls status)
 
 ## Build Time
 

@@ -21,11 +21,12 @@ const GATEWAY_URL = 'http://127.0.0.1:18789';
  */
 let cachedStatus = null;
 let statusCacheTimestamp = 0;
+let statusFetchPromise = null; // Lock to prevent parallel fetches
 const STATUS_CACHE_TTL = 30000; // 30 seconds
 
 /**
- * Get OpenClaw status with caching to prevent memory overflow
- * This reduces multiple parallel `openclaw status --json` calls to a single cached call
+ * Get OpenClaw status with caching AND locking to prevent memory overflow
+ * This ensures only ONE request fetches status at a time, others wait for the result
  */
 async function getCachedStatus() {
   const now = Date.now();
@@ -37,26 +38,59 @@ async function getCachedStatus() {
     return cachedStatus;
   }
 
-  console.log('🔄 Fetching fresh status from OpenClaw...');
-
-  try {
-    const { stdout } = await execAsync('openclaw status --json', {
-      maxBuffer: 10 * 1024 * 1024, // 10MB max buffer to prevent memory overflow
-      timeout: 15000 // 15 second timeout
-    });
-    cachedStatus = JSON.parse(stdout);
-    statusCacheTimestamp = now;
-    console.log('✅ Status cached successfully');
-    return cachedStatus;
-  } catch (error) {
-    console.error('❌ Failed to get status:', error.message);
-    // If we have old cached data, return it despite being stale
-    if (cachedStatus) {
-      console.log('⚠️  Returning stale cached status due to error');
-      return cachedStatus;
+  // If another request is already fetching, wait for that result
+  if (statusFetchPromise) {
+    console.log('⏳ Waiting for ongoing status fetch...');
+    try {
+      await statusFetchPromise;
+      // After waiting, return the cached result
+      if (cachedStatus) {
+        console.log('✅ Received status from ongoing fetch');
+        return cachedStatus;
+      }
+    } catch (error) {
+      console.error('❌ Ongoing fetch failed:', error.message);
+      // Fall through to try fetching ourselves
     }
-    throw error;
   }
+
+  // Start a new fetch (this is the lock)
+  console.log('🔄 Fetching fresh status from OpenClaw...');
+  statusFetchPromise = (async () => {
+    try {
+      const { stdout } = await execAsync('openclaw status --json', {
+        maxBuffer: 5 * 1024 * 1024, // 5MB max buffer (reduced from 10MB)
+        timeout: 10000 // 10 second timeout (reduced from 15s)
+      });
+
+      // Parse JSON safely
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch (parseError) {
+        console.error('❌ Failed to parse status JSON:', parseError.message);
+        throw new Error('Invalid JSON response from openclaw status');
+      }
+
+      cachedStatus = parsed;
+      statusCacheTimestamp = Date.now();
+      console.log('✅ Status cached successfully');
+      return cachedStatus;
+    } catch (error) {
+      console.error('❌ Failed to get status:', error.message);
+      // If we have old cached data, return it despite being stale
+      if (cachedStatus) {
+        console.log('⚠️  Returning stale cached status due to error');
+        return cachedStatus;
+      }
+      throw error;
+    } finally {
+      // Release the lock
+      statusFetchPromise = null;
+    }
+  })();
+
+  return await statusFetchPromise;
 }
 
 /**
@@ -121,8 +155,8 @@ async function proxyChatRequest(body, isStreaming = false) {
 async function getUsageStats() {
   try {
     const { stdout } = await execAsync('openclaw status --usage --json', {
-      maxBuffer: 5 * 1024 * 1024, // 5MB max buffer
-      timeout: 15000 // 15 second timeout
+      maxBuffer: 2 * 1024 * 1024, // 2MB max buffer (reduced)
+      timeout: 10000 // 10 second timeout (reduced)
     });
     const data = JSON.parse(stdout);
     return { success: true, data };
@@ -138,8 +172,8 @@ async function getUsageStats() {
 async function getRecentLogs(limit = 100) {
   try {
     const { stdout } = await execAsync(`openclaw logs --json --limit ${limit}`, {
-      maxBuffer: 5 * 1024 * 1024, // 5MB max buffer
-      timeout: 15000 // 15 second timeout
+      maxBuffer: 2 * 1024 * 1024, // 2MB max buffer (reduced)
+      timeout: 10000 // 10 second timeout (reduced)
     });
     const lines = stdout.trim().split('\n').filter(line => line);
     const logs = lines.map(line => {
@@ -334,36 +368,26 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list from cached status or config
- * Avoids calling `openclaw skills list` which dumps massive data to stdout
+ * Get installed skills list from config file only
+ * Avoids calling status/skills commands which can dump massive data
  */
 async function getSkillsList() {
   try {
     let skillsData = null;
 
-    // Method 1: Try to get skills from cached status
+    // Read from openclaw.json config file
     try {
-      const status = await getCachedStatus();
-      if (status && status.skills && Array.isArray(status.skills)) {
-        skillsData = status.skills;
-      }
-    } catch (statusError) {
-      console.error('Failed to get cached status for skills:', statusError.message);
-    }
+      const configPath = path.join(STATE_DIR, 'openclaw.json');
+      const configContent = await fs.readFile(configPath, 'utf8');
+      const config = JSON.parse(configContent);
 
-    // Method 2: Read from openclaw.json config (fallback)
-    if (!skillsData) {
-      try {
-        const configPath = path.join(STATE_DIR, 'openclaw.json');
-        const configContent = await fs.readFile(configPath, 'utf8');
-        const config = JSON.parse(configContent);
-
-        if (config.skills && Array.isArray(config.skills)) {
-          skillsData = config.skills;
-        }
-      } catch (configError) {
-        console.error('Failed to read config for skills:', configError.message);
+      if (config.skills && Array.isArray(config.skills)) {
+        skillsData = config.skills;
       }
+    } catch (configError) {
+      console.error('Failed to read config for skills:', configError.message);
+      // Return empty list instead of failing
+      return { success: true, skills: [], total: 0 };
     }
 
     // Parse skills data
@@ -459,62 +483,98 @@ const server = http.createServer(async (req, res) => {
 
   // GET /stats/usage - Get usage and cost statistics
   if (req.method === 'GET' && url.pathname === '/stats/usage') {
-    const result = await getUsageStats();
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const result = await getUsageStats();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Usage endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message }));
+    }
     return;
   }
 
   // GET /stats/logs - Get recent logs
   if (req.method === 'GET' && url.pathname === '/stats/logs') {
-    const limit = parseInt(url.searchParams.get('limit') || '100', 10);
-    const result = await getRecentLogs(limit);
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const limit = parseInt(url.searchParams.get('limit') || '100', 10);
+      const result = await getRecentLogs(limit);
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Logs endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, logs: [] }));
+    }
     return;
   }
 
   // GET /stats/sessions - Get session list and stats
   if (req.method === 'GET' && url.pathname === '/stats/sessions') {
-    const result = await getSessionStats();
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const result = await getSessionStats();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Sessions endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, sessions: [], total: 0 }));
+    }
     return;
   }
 
   // GET /stats/activity - Get activity summary
   if (req.method === 'GET' && url.pathname === '/stats/activity') {
-    const result = await getActivitySummary();
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const result = await getActivitySummary();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Activity endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, activity: { messages: 0, toolCalls: 0, errors: 0, lastActivity: null } }));
+    }
     return;
   }
 
   // GET /stats/cron - Get cron jobs list
   if (req.method === 'GET' && url.pathname === '/stats/cron') {
-    const result = await getCronJobs();
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const result = await getCronJobs();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Cron endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, jobs: [], total: 0 }));
+    }
     return;
   }
 
   // GET /stats/skills - Get installed skills list
   if (req.method === 'GET' && url.pathname === '/stats/skills') {
-    const result = await getSkillsList();
-    res.writeHead(result.success ? 200 : 500, {
-      'Content-Type': 'application/json'
-    });
-    res.end(JSON.stringify(result));
+    try {
+      const result = await getSkillsList();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Skills endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, skills: [], total: 0 }));
+    }
     return;
   }
 
@@ -538,8 +598,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /stats/cron - Get cron jobs list (cached)`);
   console.log(`   GET  /stats/skills - Get installed skills list (cached)`);
   console.log(`   `);
-  console.log(`   💾 Status caching enabled (TTL: ${STATUS_CACHE_TTL / 1000}s) to prevent memory overflow`);
-  console.log(`   🛡️  Max buffer limits: 10MB (status), 5MB (logs/usage)`);
+  console.log(`   💾 Status caching with lock (TTL: ${STATUS_CACHE_TTL / 1000}s) - prevents parallel executions`);
+  console.log(`   🛡️  Buffer limits: 5MB (status), 2MB (logs/usage) - prevents memory overflow`);
+  console.log(`   ⏱️  Timeouts: 10s (all commands) - prevents hanging`);
   console.log(`   `);
   console.log(`   Auth: Bearer ${API_SECRET.substring(0, 10)}...`);
 });
