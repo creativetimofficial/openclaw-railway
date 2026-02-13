@@ -368,150 +368,203 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list from config file
- * Skills are stored in ~/.openclaw/openclaw.json under skills.entries
- * Per documentation: https://docs.openclaw.ai/tools/skills-config
+ * Category mapping for skills
  */
-async function getSkillsList() {
-  try {
-    const configPath = path.join(STATE_DIR, 'openclaw.json');
-    const configContent = await fs.readFile(configPath, 'utf8');
-    const config = JSON.parse(configContent);
+const SKILL_CATEGORIES = {
+  'Communication': ['discord', 'slack', 'telegram', 'imsg', 'bluebubbles'],
+  'Development': ['github', 'coding-agent', 'tmux', 'oracle'],
+  'Smart Home': ['openhue', 'sonoscli', 'eightctl'],
+  'Productivity': ['notion', 'obsidian', 'trello', 'things-mac', 'apple-notes', 'apple-reminders', 'bear-notes'],
+  'Entertainment': ['spotify-player', 'songsee', 'gog'],
+  'Marketing': ['marketing-psychology', 'blogwatcher'],
+  'Media': ['openai-image-gen', 'video-frames', 'nano-pdf', 'gifgrep'],
+  'Voice & Audio': ['sag', 'openai-whisper', 'openai-whisper-api', 'sherpa-onnx-tts', 'voice-call'],
+  'Security': ['healthcheck', '1password'],
+  'Utilities': ['weather', 'skill-creator', 'camsnap', 'peekaboo', 'goplaces', 'local-places', 'food-order', 'ordercli', 'canvas', 'wacli', 'blucli', 'mcporter', 'nano-banana-pro', 'clawhub', 'summarize', 'bird', 'session-logs', 'gemini']
+};
 
-    console.log('📊 Reading skills from config.skills.entries');
+const CATEGORY_ICONS = {
+  'Communication': '💬',
+  'Development': '🛠️',
+  'Smart Home': '🏠',
+  'Productivity': '📝',
+  'Entertainment': '🎮',
+  'Marketing': '📈',
+  'Media': '🎨',
+  'Voice & Audio': '🎙️',
+  'Security': '🛡️',
+  'Utilities': '⚙️'
+};
 
-    // Skills are in config.skills.entries as an object
-    if (!config.skills) {
-      console.log('⚠️  No skills key in config');
-      return { success: true, skills: [], total: 0 };
+/**
+ * Get category for a skill name
+ */
+function getSkillCategory(skillName) {
+  for (const [category, skills] of Object.entries(SKILL_CATEGORIES)) {
+    if (skills.includes(skillName)) {
+      return category;
     }
-
-    if (!config.skills.entries || typeof config.skills.entries !== 'object') {
-      console.log('⚠️  No skills.entries in config or not an object');
-      console.log('📊 config.skills keys:', Object.keys(config.skills).join(', '));
-      return { success: true, skills: [], total: 0 };
-    }
-
-    console.log('📊 config.skills.entries keys:', Object.keys(config.skills.entries).join(', '));
-
-    // Convert entries object to array
-    const skills = Object.entries(config.skills.entries).map(([name, data]) => ({
-      name: name,
-      description: data.description || null,
-      location: 'config', // All skills from config
-      path: `~/.openclaw/openclaw.json (skills.entries.${name})`,
-      enabled: data.enabled !== false, // Default to enabled unless explicitly false
-    }));
-
-    console.log(`✅ Found ${skills.length} skills in config.skills.entries`);
-
-    return {
-      success: true,
-      skills,
-      total: skills.length
-    };
-  } catch (error) {
-    console.error('Failed to get skills from config:', error.message);
-    return { success: false, error: error.message, skills: [], total: 0 };
   }
+  return 'Utilities'; // Default
 }
 
 /**
- * List skills from filesystem directories
- * Skills are stored as directories with SKILL.md files
- * This complements the config-based skills list
+ * Parse SKILL.md frontmatter
+ */
+function parseSkillMetadata(content, skillName) {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  const metadata = {};
+
+  if (frontmatterMatch) {
+    const frontmatter = frontmatterMatch[1];
+    const lines = frontmatter.split('\n');
+
+    for (const line of lines) {
+      const colonIndex = line.indexOf(':');
+      if (colonIndex > 0) {
+        const key = line.substring(0, colonIndex).trim();
+        let value = line.substring(colonIndex + 1).trim();
+        // Remove quotes from value if present
+        if (value.startsWith('"') && value.endsWith('"')) {
+          value = value.slice(1, -1);
+        }
+        metadata[key] = value;
+      }
+    }
+  }
+
+  return {
+    name: metadata.name || skillName,
+    description: metadata.description || null
+  };
+}
+
+/**
+ * Read skills from a directory
+ */
+async function readSkillsFromDir(dirPath) {
+  const skills = [];
+
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const skillPath = path.join(dirPath, entry.name);
+        const skillMdPath = path.join(skillPath, 'SKILL.md');
+
+        try {
+          const content = await fs.readFile(skillMdPath, 'utf8');
+          const metadata = parseSkillMetadata(content, entry.name);
+
+          skills.push({
+            name: metadata.name,
+            description: metadata.description,
+            dirName: entry.name, // Original directory name for matching
+            path: skillPath
+          });
+        } catch (readError) {
+          // Skip directories without SKILL.md
+          console.log(`  ⚠️  Skipping ${entry.name} (no SKILL.md or can't read)`);
+        }
+      }
+    }
+  } catch (dirError) {
+    // Directory doesn't exist - return empty array
+    console.log(`  ⚠️  Directory not found: ${dirPath}`);
+  }
+
+  return skills;
+}
+
+/**
+ * List skills from filesystem - OpenClaw architecture
+ * Active: /data/workspace/.agents/skills/ (installed)
+ * Available: /usr/local/lib/node_modules/openclaw/skills/ (bundled)
  */
 async function listSkillsFromFilesystem() {
   try {
-    console.log('🔍 Scanning filesystem for SKILL.md files');
+    console.log('🔍 Scanning skills directories (OpenClaw architecture)');
 
-    const skillsDirs = [
-      path.join(STATE_DIR, '..', 'workspace', '.agents', 'skills'), // Project-specific skills (highest priority)
-      path.join(STATE_DIR, '..', 'workspace', 'skills'),             // Workspace skills
-      path.join(STATE_DIR, 'skills'),                                // Managed/local skills
-      '/usr/local/lib/node_modules/openclaw/skills',                 // Bundled/system skills
-    ];
+    const activeDir = path.join(STATE_DIR, '..', 'workspace', '.agents', 'skills');
+    const availableDir = '/usr/local/lib/node_modules/openclaw/skills';
 
-    console.log('🔍 Skills directories to scan:', skillsDirs);
+    console.log(`📂 Active skills: ${activeDir}`);
+    console.log(`📂 Available skills: ${availableDir}`);
 
-    const allSkills = [];
+    // Read both directories in parallel
+    const [activeSkills, availableSkills] = await Promise.all([
+      readSkillsFromDir(activeDir),
+      readSkillsFromDir(availableDir)
+    ]);
 
-    for (const skillsDir of skillsDirs) {
-      console.log(`📂 Checking directory: ${skillsDir}`);
-      try {
-        const entries = await fs.readdir(skillsDir, { withFileTypes: true });
-        console.log(`✅ Found ${entries.length} entries in ${skillsDir}`);
+    console.log(`✅ Found ${activeSkills.length} active skills`);
+    console.log(`✅ Found ${availableSkills.length} available skills`);
 
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            const skillPath = path.join(skillsDir, entry.name);
-            const skillMdPath = path.join(skillPath, 'SKILL.md');
+    // Create set of active skill names for deduplication
+    const activeSkillNames = new Set(activeSkills.map(s => s.dirName));
 
-            console.log(`  📄 Found directory: ${entry.name}, checking for SKILL.md...`);
+    // Build active skills array
+    const active = activeSkills.map(skill => {
+      const category = getSkillCategory(skill.dirName);
+      return {
+        name: skill.name,
+        description: skill.description,
+        location: 'project',
+        path: skill.path,
+        enabled: true,
+        category: category,
+        icon: CATEGORY_ICONS[category]
+      };
+    });
 
-            try {
-              const content = await fs.readFile(skillMdPath, 'utf8');
+    // Build available skills array (exclude if in active)
+    const available = availableSkills
+      .filter(skill => !activeSkillNames.has(skill.dirName))
+      .map(skill => {
+        const category = getSkillCategory(skill.dirName);
+        return {
+          name: skill.name,
+          description: skill.description,
+          location: 'bundled',
+          path: skill.path,
+          enabled: false,
+          category: category,
+          icon: CATEGORY_ICONS[category]
+        };
+      });
 
-              // Parse frontmatter
-              const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-              let metadata = {};
+    // Build categories array
+    const categoryCounts = {};
+    [...active, ...available].forEach(skill => {
+      categoryCounts[skill.category] = (categoryCounts[skill.category] || 0) + 1;
+    });
 
-              if (frontmatterMatch) {
-                const frontmatter = frontmatterMatch[1];
-                const lines = frontmatter.split('\n');
+    const categories = Object.entries(categoryCounts).map(([name, count]) => ({
+      name,
+      count,
+      icon: CATEGORY_ICONS[name]
+    })).sort((a, b) => b.count - a.count); // Sort by count descending
 
-                for (const line of lines) {
-                  const colonIndex = line.indexOf(':');
-                  if (colonIndex > 0) {
-                    const key = line.substring(0, colonIndex).trim();
-                    const value = line.substring(colonIndex + 1).trim();
-                    metadata[key] = value;
-                  }
-                }
-              }
-
-              // Determine location based on directory path
-              let location = 'managed';
-              if (skillsDir.includes('.agents/skills')) {
-                location = 'project';
-              } else if (skillsDir.includes('workspace/skills')) {
-                location = 'workspace';
-              } else if (skillsDir.includes('node_modules/openclaw')) {
-                location = 'bundled';
-              }
-
-              const skill = {
-                name: metadata.name || entry.name,
-                description: metadata.description || null,
-                location: location,
-                path: skillPath,
-                enabled: true, // Filesystem presence implies available
-              };
-
-              console.log(`  ✅ Loaded skill: ${skill.name} (${location})`);
-              allSkills.push(skill);
-            } catch (readError) {
-              // Skill directory exists but no SKILL.md or can't read it
-              console.error(`  ❌ Failed to read skill at ${skillPath}:`, readError.message);
-            }
-          }
-        }
-      } catch (dirError) {
-        // Directory doesn't exist - that's OK
-        console.log(`Skills directory ${skillsDir} not found (this is OK)`);
-      }
-    }
-
-    console.log(`📋 Total skills found: ${allSkills.length}`);
+    console.log(`📋 Categories: ${categories.map(c => `${c.name} (${c.count})`).join(', ')}`);
 
     return {
       success: true,
-      skills: allSkills,
-      total: allSkills.length,
+      active,
+      available,
+      categories,
+      total: active.length + available.length
     };
   } catch (error) {
     console.error('Failed to list skills from filesystem:', error.message);
-    return { success: false, error: error.message, skills: [], total: 0 };
+    return {
+      success: false,
+      error: error.message,
+      active: [],
+      available: [],
+      categories: [],
+      total: 0
+    };
   }
 }
 
