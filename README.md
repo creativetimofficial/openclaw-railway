@@ -1,4 +1,4 @@
-# OpenClaw Railway Template
+# OpenClaw Railway Template by Creative Tim
 
 Minimal OpenClaw deployment template using the official installation method.
 
