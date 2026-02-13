@@ -73,6 +73,10 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.gateway.auth.mode = 'token';
       config.gateway.auth.token = process.env.PAIRING_API_SECRET;
 
+      // Set default AI model to Claude Sonnet 4.5
+      if (!config.llm) config.llm = {};
+      config.llm.defaultModel = 'claude-sonnet-4-5-20250929';
+
       // Write config
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 
