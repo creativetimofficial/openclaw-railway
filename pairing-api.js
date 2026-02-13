@@ -551,15 +551,16 @@ async function getMessageStats() {
                 // Log first assistant message structure for debugging
                 if (!firstAssistantLoggedGlobal) {
                   console.log(`      🤖 First ASSISTANT message found! Role: ${msg.role || msg.author}`);
-                  console.log(`         Keys:`, Object.keys(msg));
+                  console.log(`         Message keys:`, Object.keys(msg));
                   console.log(`         Has usage:`, !!msg.usage);
                   if (msg.usage) {
-                    console.log(`         Usage keys:`, Object.keys(msg.usage));
-                    console.log(`         Token counts:`, {
-                      input: msg.usage.input_tokens,
-                      output: msg.usage.output_tokens,
-                      cacheRead: msg.usage.cache_read_input_tokens,
-                      cacheWrite: msg.usage.cache_creation_input_tokens
+                    console.log(`         Usage object:`, JSON.stringify(msg.usage, null, 2));
+                    console.log(`         Extracted token counts:`, {
+                      input: usage.input || usage.input_tokens || 0,
+                      output: usage.output || usage.output_tokens || 0,
+                      cacheRead: usage.cacheRead || usage.cache_read_input_tokens || 0,
+                      cacheWrite: usage.cacheWrite || usage.cache_creation_input_tokens || 0,
+                      cost: usage.cost
                     });
                   }
                   firstAssistantLoggedGlobal = true;
