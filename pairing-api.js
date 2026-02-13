@@ -290,15 +290,34 @@ async function getActivitySummary() {
 async function getMessageStats() {
   try {
     console.log('🔍 Parsing session files for message statistics...');
+    console.log('   STATE_DIR:', STATE_DIR);
 
-    const sessionsDir = path.join(STATE_DIR, 'agents', 'main', 'sessions');
-    const sessionsJsonPath = path.join(sessionsDir, 'sessions.json');
+    // Try multiple possible session directory locations
+    const possiblePaths = [
+      path.join(STATE_DIR, 'agents', 'main', 'sessions'),
+      path.join(STATE_DIR, 'sessions'), // Alternative path
+      '/data/.openclaw/agents/main/sessions', // Absolute path
+    ];
 
-    // Check if sessions directory exists
-    try {
-      await fs.access(sessionsDir);
-    } catch (error) {
-      console.log('⚠️  Sessions directory not found');
+    let sessionsDir = null;
+    let sessionsJsonPath = null;
+
+    // Find which path exists
+    for (const testPath of possiblePaths) {
+      try {
+        await fs.access(testPath);
+        sessionsDir = testPath;
+        sessionsJsonPath = path.join(testPath, 'sessions.json');
+        console.log(`✅ Found sessions directory at: ${sessionsDir}`);
+        break;
+      } catch (error) {
+        console.log(`   Tried: ${testPath} - not found`);
+      }
+    }
+
+    // If no sessions directory found
+    if (!sessionsDir) {
+      console.log('⚠️  No sessions directory found in any expected location');
       return {
         success: true,
         messages: {
@@ -322,11 +341,21 @@ async function getMessageStats() {
       };
     }
 
+    // List files in sessions directory for debugging
+    try {
+      const files = await fs.readdir(sessionsDir);
+      console.log(`   Files in sessions directory: ${files.join(', ')}`);
+    } catch (listError) {
+      console.log('   Could not list files:', listError.message);
+    }
+
     // Read sessions.json to get session mapping
     let sessionsData = {};
     try {
       const sessionsContent = await fs.readFile(sessionsJsonPath, 'utf8');
       sessionsData = JSON.parse(sessionsContent);
+      console.log(`✅ Read sessions.json with ${Object.keys(sessionsData).length} sessions`);
+      console.log('   Session keys:', Object.keys(sessionsData).join(', '));
     } catch (error) {
       console.log('⚠️  Could not read sessions.json:', error.message);
       return {
@@ -374,6 +403,7 @@ async function getMessageStats() {
       try {
         const content = await fs.readFile(sessionFilePath, 'utf8');
         const lines = content.trim().split('\n').filter(line => line);
+        console.log(`   Reading session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
 
         for (const line of lines) {
           try {
@@ -449,7 +479,16 @@ async function getMessageStats() {
 
     console.log(`✅ Parsed ${stats.messages.total} messages from ${sessionEntries.length} sessions`);
     console.log(`   Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web}`);
+    console.log(`   Assistant: ${stats.messages.assistant}`);
+    console.log(`   Total tokens: ${stats.tokens.total} (input: ${stats.tokens.input}, output: ${stats.tokens.output})`);
     console.log(`   Total cost: $${stats.cost.total.toFixed(4)}`);
+
+    if (stats.messages.total === 0) {
+      console.log('⚠️  No messages found - this could mean:');
+      console.log('   1. No sessions.json or empty sessions');
+      console.log('   2. Session JSONL files have no entries with type="message"');
+      console.log('   3. Session files could not be read');
+    }
 
     return {
       success: true,
