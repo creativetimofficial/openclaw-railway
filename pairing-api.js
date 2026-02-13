@@ -398,6 +398,12 @@ async function getMessageStats() {
         total: 0,
         cacheRead: 0,
         cacheWrite: 0
+      },
+      toolCalls: 0, // Track tool_use entries
+      sessions: {
+        total: 0,
+        active: 0,
+        archived: 0
       }
     };
 
@@ -419,6 +425,14 @@ async function getMessageStats() {
       // Get session key from map (if this is an active session)
       const sessionKey = sessionKeyMap[sessionId] || null;
       const isArchivedSession = !sessionKey;
+
+      // Count sessions
+      stats.sessions.total++;
+      if (isArchivedSession) {
+        stats.sessions.archived++;
+      } else {
+        stats.sessions.active++;
+      }
 
       // Detect channel from session key (initial guess)
       let channel = 'web'; // default
@@ -472,6 +486,11 @@ async function getMessageStats() {
             // Track entry types for debugging
             if (entry.type) {
               sessionEntryTypes.add(entry.type);
+            }
+
+            // Count tool_use entries separately (tool calls)
+            if (entry.type === 'tool_use' || entry.type === 'tool_call') {
+              stats.toolCalls++;
             }
 
             // Only count message entries
@@ -542,29 +561,34 @@ async function getMessageStats() {
                 const usage = msg.usage;
 
                 if (usage) {
-                  // Token counts
-                  if (usage.input_tokens) {
-                    stats.tokens.input += usage.input_tokens;
-                  }
-                  if (usage.output_tokens) {
-                    stats.tokens.output += usage.output_tokens;
-                  }
-                  if (usage.cache_read_input_tokens) {
-                    stats.tokens.cacheRead += usage.cache_read_input_tokens;
-                  }
-                  if (usage.cache_creation_input_tokens) {
-                    stats.tokens.cacheWrite += usage.cache_creation_input_tokens;
-                  }
+                  // Token counts - handle both field name formats
+                  // OpenClaw uses: input, output, cacheRead, cacheWrite
+                  // Anthropic API uses: input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
+                  const inputTokens = usage.input || usage.input_tokens || 0;
+                  const outputTokens = usage.output || usage.output_tokens || 0;
+                  const cacheReadTokens = usage.cacheRead || usage.cache_read_input_tokens || 0;
+                  const cacheWriteTokens = usage.cacheWrite || usage.cache_creation_input_tokens || 0;
 
-                  // Calculate cost (Anthropic pricing)
-                  // Input: $3 per 1M tokens, Output: $15 per 1M tokens
-                  // Cache read: $0.30 per 1M tokens, Cache write: $3.75 per 1M tokens
-                  const inputCost = (usage.input_tokens || 0) * 3 / 1000000;
-                  const outputCost = (usage.output_tokens || 0) * 15 / 1000000;
-                  const cacheReadCost = (usage.cache_read_input_tokens || 0) * 0.30 / 1000000;
-                  const cacheWriteCost = (usage.cache_creation_input_tokens || 0) * 3.75 / 1000000;
+                  stats.tokens.input += inputTokens;
+                  stats.tokens.output += outputTokens;
+                  stats.tokens.cacheRead += cacheReadTokens;
+                  stats.tokens.cacheWrite += cacheWriteTokens;
 
-                  const messageCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+                  // If cost is already calculated in usage, use it
+                  // Otherwise calculate using Anthropic pricing
+                  let messageCost = 0;
+                  if (usage.cost !== undefined && usage.cost !== null) {
+                    messageCost = usage.cost;
+                  } else {
+                    // Calculate cost (Anthropic pricing)
+                    // Input: $3 per 1M tokens, Output: $15 per 1M tokens
+                    // Cache read: $0.30 per 1M tokens, Cache write: $3.75 per 1M tokens
+                    const inputCost = inputTokens * 3 / 1000000;
+                    const outputCost = outputTokens * 15 / 1000000;
+                    const cacheReadCost = cacheReadTokens * 0.30 / 1000000;
+                    const cacheWriteCost = cacheWriteTokens * 3.75 / 1000000;
+                    messageCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+                  }
 
                   stats.cost.total += messageCost;
                   if (channel === 'telegram') {
@@ -595,13 +619,11 @@ async function getMessageStats() {
                          stats.tokens.cacheRead + stats.tokens.cacheWrite;
 
     console.log(`\n💰 ===== BILLING SUMMARY =====`);
-    console.log(`   📊 Total sessions processed: ${allSessionFiles.length} (active + archived)`);
-    console.log(`   📨 Total messages: ${stats.messages.total}`);
-    console.log(`   📱 By channel: Telegram ${stats.messages.telegram} | Web ${stats.messages.web}`);
-    console.log(`   🤖 Assistant messages: ${stats.messages.assistant} (${stats.messages.total > 0 ? ((stats.messages.assistant / stats.messages.total) * 100).toFixed(1) : 0}%)`);
-    console.log(`   💵 Total cost: $${stats.cost.total.toFixed(4)}`);
-    console.log(`      - Telegram: $${stats.cost.telegram.toFixed(4)}`);
-    console.log(`      - Web: $${stats.cost.web.toFixed(4)}`);
+    console.log(`   📊 Sessions: ${stats.sessions.total} total (${stats.sessions.active} active, ${stats.sessions.archived} archived)`);
+    console.log(`   📨 Messages: ${stats.messages.total} (Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web})`);
+    console.log(`   🤖 Assistant: ${stats.messages.assistant} messages (${stats.messages.total > 0 ? ((stats.messages.assistant / stats.messages.total) * 100).toFixed(1) : 0}%)`);
+    console.log(`   🔧 Tool calls: ${stats.toolCalls}`);
+    console.log(`   💵 Total cost: $${stats.cost.total.toFixed(4)} (Telegram: $${stats.cost.telegram.toFixed(4)}, Web: $${stats.cost.web.toFixed(4)})`);
     console.log(`   🔢 Tokens: ${stats.tokens.total.toLocaleString()} (in: ${stats.tokens.input.toLocaleString()}, out: ${stats.tokens.output.toLocaleString()})`);
 
     if (stats.messages.total === 0) {
@@ -622,7 +644,9 @@ async function getMessageStats() {
       error: error.message,
       messages: { total: 0, telegram: 0, web: 0, assistant: 0 },
       cost: { total: 0, telegram: 0, web: 0 },
-      tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 }
+      tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
+      toolCalls: 0,
+      sessions: { total: 0, active: 0, archived: 0 }
     };
   }
 }
