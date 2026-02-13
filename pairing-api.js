@@ -284,6 +284,190 @@ async function getActivitySummary() {
 }
 
 /**
+ * Get message statistics by parsing session JSONL files
+ * Provides accurate message counts, costs, and token usage per channel
+ */
+async function getMessageStats() {
+  try {
+    console.log('🔍 Parsing session files for message statistics...');
+
+    const sessionsDir = path.join(STATE_DIR, 'agents', 'main', 'sessions');
+    const sessionsJsonPath = path.join(sessionsDir, 'sessions.json');
+
+    // Check if sessions directory exists
+    try {
+      await fs.access(sessionsDir);
+    } catch (error) {
+      console.log('⚠️  Sessions directory not found');
+      return {
+        success: true,
+        messages: {
+          total: 0,
+          telegram: 0,
+          web: 0,
+          assistant: 0
+        },
+        cost: {
+          total: 0,
+          telegram: 0,
+          web: 0
+        },
+        tokens: {
+          input: 0,
+          output: 0,
+          total: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        }
+      };
+    }
+
+    // Read sessions.json to get session mapping
+    let sessionsData = {};
+    try {
+      const sessionsContent = await fs.readFile(sessionsJsonPath, 'utf8');
+      sessionsData = JSON.parse(sessionsContent);
+    } catch (error) {
+      console.log('⚠️  Could not read sessions.json:', error.message);
+      return {
+        success: true,
+        messages: { total: 0, telegram: 0, web: 0, assistant: 0 },
+        cost: { total: 0, telegram: 0, web: 0 },
+        tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 }
+      };
+    }
+
+    // Initialize counters
+    const stats = {
+      messages: {
+        total: 0,
+        telegram: 0,
+        web: 0,
+        assistant: 0
+      },
+      cost: {
+        total: 0,
+        telegram: 0,
+        web: 0
+      },
+      tokens: {
+        input: 0,
+        output: 0,
+        total: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      }
+    };
+
+    // Parse each session file
+    const sessionEntries = Object.entries(sessionsData);
+    console.log(`📊 Found ${sessionEntries.length} sessions to parse`);
+
+    for (const [sessionKey, sessionId] of sessionEntries) {
+      const sessionFilePath = path.join(sessionsDir, `${sessionId}.jsonl`);
+
+      // Detect channel from session key
+      const isTelegram = sessionKey.toLowerCase().includes('telegram') ||
+                         sessionKey.toLowerCase().includes('tg');
+      const channel = isTelegram ? 'telegram' : 'web';
+
+      try {
+        const content = await fs.readFile(sessionFilePath, 'utf8');
+        const lines = content.trim().split('\n').filter(line => line);
+
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+
+            // Only count message entries
+            if (entry.type === 'message') {
+              stats.messages.total++;
+
+              // Count by channel
+              if (channel === 'telegram') {
+                stats.messages.telegram++;
+              } else {
+                stats.messages.web++;
+              }
+
+              // Count assistant messages separately
+              if (entry.role === 'assistant') {
+                stats.messages.assistant++;
+
+                // Extract cost and token data from usage field
+                if (entry.usage) {
+                  const usage = entry.usage;
+
+                  // Token counts
+                  if (usage.input_tokens) {
+                    stats.tokens.input += usage.input_tokens;
+                  }
+                  if (usage.output_tokens) {
+                    stats.tokens.output += usage.output_tokens;
+                  }
+                  if (usage.cache_read_input_tokens) {
+                    stats.tokens.cacheRead += usage.cache_read_input_tokens;
+                  }
+                  if (usage.cache_creation_input_tokens) {
+                    stats.tokens.cacheWrite += usage.cache_creation_input_tokens;
+                  }
+
+                  // Calculate cost (Anthropic pricing)
+                  // Input: $3 per 1M tokens, Output: $15 per 1M tokens
+                  // Cache read: $0.30 per 1M tokens, Cache write: $3.75 per 1M tokens
+                  const inputCost = (usage.input_tokens || 0) * 3 / 1000000;
+                  const outputCost = (usage.output_tokens || 0) * 15 / 1000000;
+                  const cacheReadCost = (usage.cache_read_input_tokens || 0) * 0.30 / 1000000;
+                  const cacheWriteCost = (usage.cache_creation_input_tokens || 0) * 3.75 / 1000000;
+
+                  const messageCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+
+                  stats.cost.total += messageCost;
+                  if (channel === 'telegram') {
+                    stats.cost.telegram += messageCost;
+                  } else {
+                    stats.cost.web += messageCost;
+                  }
+                }
+              }
+            }
+          } catch (parseError) {
+            // Skip invalid JSON lines
+            continue;
+          }
+        }
+      } catch (fileError) {
+        // Session file doesn't exist or can't be read - skip it
+        console.log(`⚠️  Could not read session file ${sessionId}:`, fileError.message);
+        continue;
+      }
+    }
+
+    // Calculate total tokens
+    stats.tokens.total = stats.tokens.input + stats.tokens.output +
+                         stats.tokens.cacheRead + stats.tokens.cacheWrite;
+
+    console.log(`✅ Parsed ${stats.messages.total} messages from ${sessionEntries.length} sessions`);
+    console.log(`   Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web}`);
+    console.log(`   Total cost: $${stats.cost.total.toFixed(4)}`);
+
+    return {
+      success: true,
+      ...stats
+    };
+  } catch (error) {
+    console.error('Failed to get message stats:', error.message);
+    return {
+      success: false,
+      error: error.message,
+      messages: { total: 0, telegram: 0, web: 0, assistant: 0 },
+      cost: { total: 0, telegram: 0, web: 0 },
+      tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 }
+    };
+  }
+}
+
+/**
  * Get cron jobs list from cached OpenClaw status and config files
  */
 async function getCronJobs() {
@@ -759,6 +943,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /stats/messages - Get message statistics from session JSONL files
+  if (req.method === 'GET' && url.pathname === '/stats/messages') {
+    try {
+      const result = await getMessageStats();
+      res.writeHead(result.success ? 200 : 500, {
+        'Content-Type': 'application/json'
+      });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Messages endpoint error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: error.message,
+        messages: { total: 0, telegram: 0, web: 0, assistant: 0 },
+        cost: { total: 0, telegram: 0, web: 0 },
+        tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 }
+      }));
+    }
+    return;
+  }
+
   // GET /stats/cron - Get cron jobs list
   if (req.method === 'GET' && url.pathname === '/stats/cron') {
     try {
@@ -873,6 +1079,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /stats/logs?limit=100 - Get recent logs`);
   console.log(`   GET  /stats/sessions - Get session list (cached)`);
   console.log(`   GET  /stats/activity - Get activity summary`);
+  console.log(`   GET  /stats/messages - Get message stats from JSONL files`);
   console.log(`   GET  /stats/cron - Get cron jobs list (cached)`);
   console.log(`   GET  /stats/skills - Get installed skills list (cached)`);
   console.log(`   `);
