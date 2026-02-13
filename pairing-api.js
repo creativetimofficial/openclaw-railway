@@ -548,24 +548,6 @@ async function getMessageStats() {
               if (isAssistant) {
                 stats.messages.assistant++;
 
-                // Log first assistant message structure for debugging
-                if (!firstAssistantLoggedGlobal) {
-                  console.log(`      🤖 First ASSISTANT message found! Role: ${msg.role || msg.author}`);
-                  console.log(`         Message keys:`, Object.keys(msg));
-                  console.log(`         Has usage:`, !!msg.usage);
-                  if (msg.usage) {
-                    console.log(`         Usage object:`, JSON.stringify(msg.usage, null, 2));
-                    console.log(`         Extracted token counts:`, {
-                      input: usage.input || usage.input_tokens || 0,
-                      output: usage.output || usage.output_tokens || 0,
-                      cacheRead: usage.cacheRead || usage.cache_read_input_tokens || 0,
-                      cacheWrite: usage.cacheWrite || usage.cache_creation_input_tokens || 0,
-                      cost: usage.cost
-                    });
-                  }
-                  firstAssistantLoggedGlobal = true;
-                }
-
                 // Extract cost and token data from usage field
                 // Usage is in the nested message object
                 const usage = msg.usage;
@@ -579,17 +561,48 @@ async function getMessageStats() {
                   const cacheReadTokens = usage.cacheRead || usage.cache_read_input_tokens || 0;
                   const cacheWriteTokens = usage.cacheWrite || usage.cache_creation_input_tokens || 0;
 
+                  // Log first assistant message structure for debugging
+                  if (!firstAssistantLoggedGlobal) {
+                    console.log(`      🤖 First ASSISTANT message found! Role: ${msg.role || msg.author}`);
+                    console.log(`         Message keys:`, Object.keys(msg));
+                    console.log(`         Has usage:`, !!msg.usage);
+                    console.log(`         Usage object:`, JSON.stringify(msg.usage, null, 2));
+
+                    // Show what we'll extract
+                    const extractedCost = (typeof usage.cost === 'object' && usage.cost.total !== undefined)
+                      ? usage.cost.total
+                      : (typeof usage.cost === 'number' ? usage.cost : 0);
+
+                    console.log(`         ✅ Extracted values:`, {
+                      input: inputTokens,
+                      output: outputTokens,
+                      cacheRead: cacheReadTokens,
+                      cacheWrite: cacheWriteTokens,
+                      cost: extractedCost,
+                      costType: typeof usage.cost
+                    });
+                    firstAssistantLoggedGlobal = true;
+                  }
+
                   stats.tokens.input += inputTokens;
                   stats.tokens.output += outputTokens;
                   stats.tokens.cacheRead += cacheReadTokens;
                   stats.tokens.cacheWrite += cacheWriteTokens;
 
                   // If cost is already calculated in usage, use it
-                  // Otherwise calculate using Anthropic pricing
+                  // Cost can be a number OR an object with { input, output, total }
                   let messageCost = 0;
                   if (usage.cost !== undefined && usage.cost !== null) {
-                    messageCost = usage.cost;
-                  } else {
+                    // Check if cost is an object or a number
+                    if (typeof usage.cost === 'object' && usage.cost.total !== undefined) {
+                      messageCost = usage.cost.total; // Use pre-calculated total cost
+                    } else if (typeof usage.cost === 'number') {
+                      messageCost = usage.cost;
+                    }
+                  }
+
+                  // If no cost provided, calculate using Anthropic pricing
+                  if (messageCost === 0) {
                     // Calculate cost (Anthropic pricing)
                     // Input: $3 per 1M tokens, Output: $15 per 1M tokens
                     // Cache read: $0.30 per 1M tokens, Cache write: $3.75 per 1M tokens
