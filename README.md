@@ -58,16 +58,22 @@ This template:
    - Sessions, cron, and skills all share the same cached status data
 
    **Skills Management:**
-   - Skills are stored as directories with `SKILL.md` files
-   - Workspace skills: `/data/workspace/skills/<skill-name>/SKILL.md`
-   - Managed skills: `/data/.openclaw/skills/<skill-name>/SKILL.md`
-   - Install new skills via POST to `/skills/install` with JSON body:
-     ```json
-     {
-       "skillName": "my-skill",
-       "skillContent": "---\nname: my-skill\ndescription: Does something\n---\n\nInstructions here..."
-     }
-     ```
+   - Skills configuration is stored in `~/.openclaw/openclaw.json` → `skills.entries`
+   - Skills files are directories with `SKILL.md` files in (priority order):
+     - Project-specific: `/data/workspace/.agents/skills/<skill-name>/SKILL.md` (highest)
+     - Workspace: `/data/workspace/skills/<skill-name>/SKILL.md`
+     - Managed/local: `/data/.openclaw/skills/<skill-name>/SKILL.md`
+     - Bundled/system: `/usr/local/lib/node_modules/openclaw/skills/<skill-name>/SKILL.md` (lowest)
+   - GET `/stats/skills` returns configured skills from `openclaw.json`
+   - GET `/skills/filesystem` scans all 4 locations for SKILL.md files (advanced)
+   - POST `/skills/install` creates SKILL.md programmatically (not commonly used)
+
+   **Current Skills Installation Method:**
+   - Users install skills by chatting with the agent
+   - Example: "Hey, install skill with `npx clawhub install skill-name`"
+   - Command installs files AND updates `openclaw.json` config
+   - Skills appear in dashboard from `skills.entries` in config
+   - This is the recommended MVP approach until full UI is built
 
 ## Build Time
 

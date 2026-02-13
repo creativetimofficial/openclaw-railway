@@ -368,144 +368,86 @@ async function getCronJobs() {
 }
 
 /**
- * Get installed skills list from cached status
- * Safe to use cached status now that we have proper locking
+ * Get installed skills list from config file
+ * Skills are stored in ~/.openclaw/openclaw.json under skills.entries
+ * Per documentation: https://docs.openclaw.ai/tools/skills-config
  */
 async function getSkillsList() {
   try {
-    let skillsData = null;
-    let sourceLocation = 'unknown';
+    const configPath = path.join(STATE_DIR, 'openclaw.json');
+    const configContent = await fs.readFile(configPath, 'utf8');
+    const config = JSON.parse(configContent);
 
-    // Method 1: Try to get skills from cached status (safe with locking)
-    try {
-      const status = await getCachedStatus();
+    console.log('📊 Reading skills from config.skills.entries');
 
-      // Log the top-level keys to help debug
-      console.log('📊 Status object keys:', Object.keys(status).join(', '));
-
-      // Try multiple possible locations where skills might be stored
-      if (status.skills && Array.isArray(status.skills)) {
-        skillsData = status.skills;
-        sourceLocation = 'status.skills';
-      } else if (status.skills && typeof status.skills === 'object') {
-        // skills might be an object with sub-properties
-        if (status.skills.eligible && Array.isArray(status.skills.eligible)) {
-          skillsData = status.skills.eligible;
-          sourceLocation = 'status.skills.eligible';
-        } else if (status.skills.all && Array.isArray(status.skills.all)) {
-          skillsData = status.skills.all;
-          sourceLocation = 'status.skills.all';
-        } else if (status.skills.registry && Array.isArray(status.skills.registry)) {
-          skillsData = status.skills.registry;
-          sourceLocation = 'status.skills.registry';
-        }
-      } else if (status.registry && status.registry.skills && Array.isArray(status.registry.skills)) {
-        skillsData = status.registry.skills;
-        sourceLocation = 'status.registry.skills';
-      } else if (status.extensions && Array.isArray(status.extensions)) {
-        skillsData = status.extensions;
-        sourceLocation = 'status.extensions';
-      } else if (status.tools && Array.isArray(status.tools)) {
-        skillsData = status.tools;
-        sourceLocation = 'status.tools';
-      }
-
-      if (skillsData) {
-        console.log(`✅ Found ${skillsData.length} skills in ${sourceLocation}`);
-      } else {
-        console.log('⚠️  No skills array found in status object');
-      }
-    } catch (statusError) {
-      console.error('Failed to get cached status for skills:', statusError.message);
+    // Skills are in config.skills.entries as an object
+    if (!config.skills) {
+      console.log('⚠️  No skills key in config');
+      return { success: true, skills: [], total: 0 };
     }
 
-    // Method 2: Fallback to config file if status doesn't have skills
-    if (!skillsData) {
-      try {
-        const configPath = path.join(STATE_DIR, 'openclaw.json');
-        const configContent = await fs.readFile(configPath, 'utf8');
-        const config = JSON.parse(configContent);
-
-        console.log('📊 Config object keys:', Object.keys(config).join(', '));
-
-        if (config.skills && Array.isArray(config.skills)) {
-          skillsData = config.skills;
-          sourceLocation = 'config.skills';
-        } else if (config.skills && typeof config.skills === 'object' && config.skills.entries) {
-          // Skills might be in config.skills.entries as an object
-          skillsData = Object.entries(config.skills.entries).map(([name, data]) => ({
-            name,
-            ...data
-          }));
-          sourceLocation = 'config.skills.entries';
-        } else if (config.registry && config.registry.skills && Array.isArray(config.registry.skills)) {
-          skillsData = config.registry.skills;
-          sourceLocation = 'config.registry.skills';
-        }
-
-        if (skillsData) {
-          console.log(`✅ Found ${skillsData.length} skills in ${sourceLocation}`);
-        } else {
-          console.log('⚠️  No skills found in config file');
-        }
-      } catch (configError) {
-        console.error('Failed to read config for skills:', configError.message);
-      }
+    if (!config.skills.entries || typeof config.skills.entries !== 'object') {
+      console.log('⚠️  No skills.entries in config or not an object');
+      console.log('📊 config.skills keys:', Object.keys(config.skills).join(', '));
+      return { success: true, skills: [], total: 0 };
     }
 
-    // Parse skills data if found
-    if (skillsData && Array.isArray(skillsData)) {
-      const skills = skillsData
-        .filter(s => {
-          // Filter for eligible or bundled skills
-          return s.eligible === true || s.bundled === true || s.enabled === true;
-        })
-        .map(s => ({
-          name: s.name || s.skillName || 'Unknown',
-          version: s.version || null,
-          enabled: s.eligible === true || s.enabled === true,
-          description: s.description || s.summary || null,
-          emoji: s.emoji || null
-        }));
+    console.log('📊 config.skills.entries keys:', Object.keys(config.skills.entries).join(', '));
 
-      console.log(`📋 Returning ${skills.length} eligible/enabled skills`);
+    // Convert entries object to array
+    const skills = Object.entries(config.skills.entries).map(([name, data]) => ({
+      name: name,
+      description: data.description || null,
+      location: 'config', // All skills from config
+      path: `~/.openclaw/openclaw.json (skills.entries.${name})`,
+      enabled: data.enabled !== false, // Default to enabled unless explicitly false
+    }));
 
-      return {
-        success: true,
-        skills,
-        total: skills.length
-      };
-    }
+    console.log(`✅ Found ${skills.length} skills in config.skills.entries`);
 
-    console.log('❌ No skills data found anywhere');
-    return { success: true, skills: [], total: 0 };
+    return {
+      success: true,
+      skills,
+      total: skills.length
+    };
   } catch (error) {
-    console.error('Failed to get skills:', error.message);
-    return { success: true, skills: [], total: 0 };
+    console.error('Failed to get skills from config:', error.message);
+    return { success: false, error: error.message, skills: [], total: 0 };
   }
 }
 
 /**
  * List skills from filesystem directories
  * Skills are stored as directories with SKILL.md files
+ * This complements the config-based skills list
  */
 async function listSkillsFromFilesystem() {
   try {
+    console.log('🔍 Scanning filesystem for SKILL.md files');
+
     const skillsDirs = [
-      path.join(STATE_DIR, '..', 'workspace', 'skills'), // Workspace skills (highest priority)
-      path.join(STATE_DIR, 'skills'),                     // Managed skills
+      path.join(STATE_DIR, '..', 'workspace', '.agents', 'skills'), // Project-specific skills (highest priority)
+      path.join(STATE_DIR, '..', 'workspace', 'skills'),             // Workspace skills
+      path.join(STATE_DIR, 'skills'),                                // Managed/local skills
+      '/usr/local/lib/node_modules/openclaw/skills',                 // Bundled/system skills
     ];
+
+    console.log('🔍 Skills directories to scan:', skillsDirs);
 
     const allSkills = [];
 
     for (const skillsDir of skillsDirs) {
+      console.log(`📂 Checking directory: ${skillsDir}`);
       try {
         const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+        console.log(`✅ Found ${entries.length} entries in ${skillsDir}`);
 
         for (const entry of entries) {
           if (entry.isDirectory()) {
             const skillPath = path.join(skillsDir, entry.name);
             const skillMdPath = path.join(skillPath, 'SKILL.md');
+
+            console.log(`  📄 Found directory: ${entry.name}, checking for SKILL.md...`);
 
             try {
               const content = await fs.readFile(skillMdPath, 'utf8');
@@ -528,16 +470,29 @@ async function listSkillsFromFilesystem() {
                 }
               }
 
-              allSkills.push({
+              // Determine location based on directory path
+              let location = 'managed';
+              if (skillsDir.includes('.agents/skills')) {
+                location = 'project';
+              } else if (skillsDir.includes('workspace/skills')) {
+                location = 'workspace';
+              } else if (skillsDir.includes('node_modules/openclaw')) {
+                location = 'bundled';
+              }
+
+              const skill = {
                 name: metadata.name || entry.name,
                 description: metadata.description || null,
-                location: skillsDir.includes('workspace') ? 'workspace' : 'managed',
+                location: location,
                 path: skillPath,
-                enabled: true, // Filesystem presence implies enabled
-              });
+                enabled: true, // Filesystem presence implies available
+              };
+
+              console.log(`  ✅ Loaded skill: ${skill.name} (${location})`);
+              allSkills.push(skill);
             } catch (readError) {
               // Skill directory exists but no SKILL.md or can't read it
-              console.error(`Failed to read skill at ${skillPath}:`, readError.message);
+              console.error(`  ❌ Failed to read skill at ${skillPath}:`, readError.message);
             }
           }
         }
@@ -546,6 +501,8 @@ async function listSkillsFromFilesystem() {
         console.log(`Skills directory ${skillsDir} not found (this is OK)`);
       }
     }
+
+    console.log(`📋 Total skills found: ${allSkills.length}`);
 
     return {
       success: true,
