@@ -356,6 +356,12 @@ async function getMessageStats() {
       sessionsData = JSON.parse(sessionsContent);
       console.log(`✅ Read sessions.json with ${Object.keys(sessionsData).length} sessions`);
       console.log('   Session keys:', Object.keys(sessionsData).join(', '));
+
+      // Debug: Log the first session entry structure
+      const firstKey = Object.keys(sessionsData)[0];
+      if (firstKey) {
+        console.log(`   First session entry:`, JSON.stringify({ key: firstKey, value: sessionsData[firstKey] }, null, 2));
+      }
     } catch (error) {
       console.log('⚠️  Could not read sessions.json:', error.message);
       return {
@@ -392,7 +398,23 @@ async function getMessageStats() {
     const sessionEntries = Object.entries(sessionsData);
     console.log(`📊 Found ${sessionEntries.length} sessions to parse`);
 
-    for (const [sessionKey, sessionId] of sessionEntries) {
+    for (const [sessionKey, sessionValue] of sessionEntries) {
+      // sessionValue might be a string (sessionId) or an object with sessionId property
+      let sessionId;
+      if (typeof sessionValue === 'string') {
+        sessionId = sessionValue;
+      } else if (typeof sessionValue === 'object' && sessionValue !== null) {
+        // Try common property names
+        sessionId = sessionValue.sessionId || sessionValue.id || sessionValue.key;
+      }
+
+      if (!sessionId) {
+        console.log(`⚠️  Could not extract sessionId from:`, JSON.stringify(sessionValue));
+        continue;
+      }
+
+      console.log(`   Processing session: key="${sessionKey}" -> id="${sessionId}"`);
+
       const sessionFilePath = path.join(sessionsDir, `${sessionId}.jsonl`);
 
       // Detect channel from session key
@@ -403,14 +425,23 @@ async function getMessageStats() {
       try {
         const content = await fs.readFile(sessionFilePath, 'utf8');
         const lines = content.trim().split('\n').filter(line => line);
-        console.log(`   Reading session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
+        console.log(`   ✅ Reading session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
+
+        let sessionMessageCount = 0;
+        let sessionEntryTypes = new Set();
 
         for (const line of lines) {
           try {
             const entry = JSON.parse(line);
 
+            // Track entry types for debugging
+            if (entry.type) {
+              sessionEntryTypes.add(entry.type);
+            }
+
             // Only count message entries
             if (entry.type === 'message') {
+              sessionMessageCount++;
               stats.messages.total++;
 
               // Count by channel
@@ -466,6 +497,8 @@ async function getMessageStats() {
             continue;
           }
         }
+
+        console.log(`      Found ${sessionMessageCount} messages, entry types: ${Array.from(sessionEntryTypes).join(', ')}`);
       } catch (fileError) {
         // Session file doesn't exist or can't be read - skip it
         console.log(`⚠️  Could not read session file ${sessionId}:`, fileError.message);
