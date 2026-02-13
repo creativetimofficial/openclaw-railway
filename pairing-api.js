@@ -437,13 +437,14 @@ async function getMessageStats() {
         continue;
       }
 
-      console.log(`   Processing session: key="${sessionKey}" -> id="${sessionId}"`);
-
       const sessionFilePath = path.join(sessionsDir, `${sessionId}.jsonl`);
 
       // Detect channel from session key (initial guess)
       let channel = 'web'; // default
       if (sessionKey.toLowerCase().includes('telegram') || sessionKey.toLowerCase().includes('tg')) {
+        channel = 'telegram';
+      } else if (sessionKey === 'agent:main:main' || sessionKey.toLowerCase().includes(':main:main')) {
+        // "agent:main:main" is the default Telegram session
         channel = 'telegram';
       } else if (sessionKey.toLowerCase().includes('web')) {
         channel = 'web';
@@ -460,7 +461,11 @@ async function getMessageStats() {
             if (firstEntry.type === 'session') {
               // Check for telegram indicators in session metadata
               const sessionStr = JSON.stringify(firstEntry).toLowerCase();
-              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"')) {
+              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"') || sessionStr.includes('telegram-channel')) {
+                channel = 'telegram';
+              }
+              // Check session key if available
+              if (firstEntry.key === 'agent:main:main' || (firstEntry.key && firstEntry.key.includes(':main:main'))) {
                 channel = 'telegram';
               }
             }
@@ -469,7 +474,7 @@ async function getMessageStats() {
           }
         }
 
-        console.log(`   ✅ Reading session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
+        console.log(`   ✅ Reading session "${sessionKey.substring(0, 40)}..." -> ${sessionId}: ${lines.length} lines, channel: ${channel}`);
 
         let sessionMessageCount = 0;
         let sessionEntryTypes = new Set();
@@ -493,13 +498,19 @@ async function getMessageStats() {
               if (!firstMessageLogged && sessionMessageCount === 1) {
                 // Show all top-level keys to understand structure
                 console.log(`      📝 First message keys:`, Object.keys(entry));
-                console.log(`      📝 First message sample:`, JSON.stringify({
-                  type: entry.type,
-                  role: entry.role,
-                  author: entry.author,
-                  hasUsage: !!entry.usage,
-                  hasContent: !!entry.content,
-                  hasMessage: !!entry.message
+                console.log(`      📝 Nested message keys:`, entry.message ? Object.keys(entry.message) : 'no message field');
+                console.log(`      📝 Message structure:`, JSON.stringify({
+                  topLevel: {
+                    type: entry.type,
+                    role: entry.role,
+                    author: entry.author,
+                  },
+                  nested: entry.message ? {
+                    role: entry.message.role,
+                    author: entry.message.author,
+                    hasContent: !!entry.message.content,
+                    hasUsage: !!entry.message.usage
+                  } : null
                 }, null, 2));
                 firstMessageLogged = true;
               }
@@ -512,19 +523,21 @@ async function getMessageStats() {
               }
 
               // Count assistant messages separately
+              // The message data is nested in entry.message!
+              const msg = entry.message || entry;
+
               // Check multiple possible fields for role detection
-              const isAssistant = entry.role === 'assistant' ||
-                                  entry.author === 'assistant' ||
-                                  entry.role === 'ai' ||
-                                  entry.author === 'ai' ||
-                                  (entry.message && entry.message.role === 'assistant');
+              const isAssistant = msg.role === 'assistant' ||
+                                  msg.author === 'assistant' ||
+                                  msg.role === 'ai' ||
+                                  msg.author === 'ai';
 
               if (isAssistant) {
                 stats.messages.assistant++;
 
                 // Extract cost and token data from usage field
-                // Usage might be at top level or nested in message
-                const usage = entry.usage || (entry.message && entry.message.usage);
+                // Usage is in the nested message object
+                const usage = msg.usage;
 
                 if (usage) {
                   // Token counts
@@ -593,10 +606,14 @@ async function getMessageStats() {
             try {
               const firstEntry = JSON.parse(lines[0]);
               const sessionStr = JSON.stringify(firstEntry).toLowerCase();
-              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"')) {
+              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"') || sessionStr.includes('telegram-channel')) {
                 channel = 'telegram';
               } else if (sessionStr.includes('web')) {
                 channel = 'web';
+              }
+              // Check session key if available
+              if (firstEntry.key === 'agent:main:main' || (firstEntry.key && firstEntry.key.includes(':main:main'))) {
+                channel = 'telegram';
               }
             } catch (e) {
               // Keep as unknown
@@ -620,16 +637,18 @@ async function getMessageStats() {
                   stats.messages.web++;
                 }
 
-                const isAssistant = entry.role === 'assistant' ||
-                                    entry.author === 'assistant' ||
-                                    entry.role === 'ai' ||
-                                    entry.author === 'ai' ||
-                                    (entry.message && entry.message.role === 'assistant');
+                // The message data is nested in entry.message!
+                const msg = entry.message || entry;
+
+                const isAssistant = msg.role === 'assistant' ||
+                                    msg.author === 'assistant' ||
+                                    msg.role === 'ai' ||
+                                    msg.author === 'ai';
 
                 if (isAssistant) {
                   stats.messages.assistant++;
 
-                  const usage = entry.usage || (entry.message && entry.message.usage);
+                  const usage = msg.usage;
                   if (usage) {
                     stats.tokens.input += usage.input_tokens || 0;
                     stats.tokens.output += usage.output_tokens || 0;
@@ -667,11 +686,11 @@ async function getMessageStats() {
     stats.tokens.total = stats.tokens.input + stats.tokens.output +
                          stats.tokens.cacheRead + stats.tokens.cacheWrite;
 
-    console.log(`✅ Parsed ${stats.messages.total} messages from ${sessionEntries.length} sessions`);
-    console.log(`   Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web}`);
-    console.log(`   Assistant: ${stats.messages.assistant}`);
-    console.log(`   Total tokens: ${stats.tokens.total} (input: ${stats.tokens.input}, output: ${stats.tokens.output})`);
-    console.log(`   Total cost: $${stats.cost.total.toFixed(4)}`);
+    console.log(`\n✅ FINAL STATS - Parsed ${stats.messages.total} messages from ${sessionEntries.length + orphanedFiles.length} sessions`);
+    console.log(`   📊 By Channel: Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web}`);
+    console.log(`   🤖 Assistant messages: ${stats.messages.assistant} (${((stats.messages.assistant / stats.messages.total) * 100).toFixed(1)}%)`);
+    console.log(`   💰 Total cost: $${stats.cost.total.toFixed(4)} (Telegram: $${stats.cost.telegram.toFixed(4)}, Web: $${stats.cost.web.toFixed(4)})`);
+    console.log(`   🔢 Total tokens: ${stats.tokens.total} (input: ${stats.tokens.input}, output: ${stats.tokens.output})`);
 
     if (stats.messages.total === 0) {
       console.log('⚠️  No messages found - this could mean:');
