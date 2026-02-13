@@ -486,6 +486,140 @@ async function getSkillsList() {
 }
 
 /**
+ * List skills from filesystem directories
+ * Skills are stored as directories with SKILL.md files
+ */
+async function listSkillsFromFilesystem() {
+  try {
+    const skillsDirs = [
+      path.join(STATE_DIR, '..', 'workspace', 'skills'), // Workspace skills (highest priority)
+      path.join(STATE_DIR, 'skills'),                     // Managed skills
+    ];
+
+    const allSkills = [];
+
+    for (const skillsDir of skillsDirs) {
+      try {
+        const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const skillPath = path.join(skillsDir, entry.name);
+            const skillMdPath = path.join(skillPath, 'SKILL.md');
+
+            try {
+              const content = await fs.readFile(skillMdPath, 'utf8');
+
+              // Parse frontmatter
+              const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+              let metadata = {};
+
+              if (frontmatterMatch) {
+                const frontmatter = frontmatterMatch[1];
+                const lines = frontmatter.split('\n');
+
+                for (const line of lines) {
+                  const colonIndex = line.indexOf(':');
+                  if (colonIndex > 0) {
+                    const key = line.substring(0, colonIndex).trim();
+                    const value = line.substring(colonIndex + 1).trim();
+                    metadata[key] = value;
+                  }
+                }
+              }
+
+              allSkills.push({
+                name: metadata.name || entry.name,
+                description: metadata.description || null,
+                location: skillsDir.includes('workspace') ? 'workspace' : 'managed',
+                path: skillPath,
+                enabled: true, // Filesystem presence implies enabled
+              });
+            } catch (readError) {
+              // Skill directory exists but no SKILL.md or can't read it
+              console.error(`Failed to read skill at ${skillPath}:`, readError.message);
+            }
+          }
+        }
+      } catch (dirError) {
+        // Directory doesn't exist - that's OK
+        console.log(`Skills directory ${skillsDir} not found (this is OK)`);
+      }
+    }
+
+    return {
+      success: true,
+      skills: allSkills,
+      total: allSkills.length,
+    };
+  } catch (error) {
+    console.error('Failed to list skills from filesystem:', error.message);
+    return { success: false, error: error.message, skills: [], total: 0 };
+  }
+}
+
+/**
+ * Install a new skill by writing SKILL.md to the workspace skills directory
+ */
+async function installSkill(skillName, skillContent) {
+  try {
+    // Validate skill name (alphanumeric, hyphens, underscores only)
+    if (!/^[a-zA-Z0-9_-]+$/.test(skillName)) {
+      return {
+        success: false,
+        error: 'Invalid skill name. Use only letters, numbers, hyphens, and underscores.',
+      };
+    }
+
+    // Validate skill content has frontmatter
+    if (!skillContent.startsWith('---\n')) {
+      return {
+        success: false,
+        error: 'Skill content must start with YAML frontmatter (---)',
+      };
+    }
+
+    const workspaceSkillsDir = path.join(STATE_DIR, '..', 'workspace', 'skills');
+    const skillDir = path.join(workspaceSkillsDir, skillName);
+    const skillFilePath = path.join(skillDir, 'SKILL.md');
+
+    // Check if skill already exists
+    try {
+      await fs.access(skillFilePath);
+      return {
+        success: false,
+        error: `Skill '${skillName}' already exists. Delete it first to reinstall.`,
+      };
+    } catch {
+      // Skill doesn't exist - good, we can proceed
+    }
+
+    // Create skills directory if it doesn't exist
+    await fs.mkdir(workspaceSkillsDir, { recursive: true });
+
+    // Create skill directory
+    await fs.mkdir(skillDir, { recursive: true });
+
+    // Write SKILL.md file
+    await fs.writeFile(skillFilePath, skillContent, 'utf8');
+
+    console.log(`✅ Installed skill: ${skillName} at ${skillFilePath}`);
+
+    return {
+      success: true,
+      message: `Skill '${skillName}' installed successfully`,
+      path: skillFilePath,
+    };
+  } catch (error) {
+    console.error('Failed to install skill:', error.message);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
+/**
  * Simple HTTP server
  */
 const server = http.createServer(async (req, res) => {
@@ -647,6 +781,71 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // GET /debug/status - Get raw status output for debugging
+  if (req.method === 'GET' && url.pathname === '/debug/status') {
+    try {
+      const status = await getCachedStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, status }, null, 2));
+    } catch (error) {
+      console.error('Debug status error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message }));
+    }
+    return;
+  }
+
+  // GET /debug/config - Get raw config for debugging
+  if (req.method === 'GET' && url.pathname === '/debug/config') {
+    try {
+      const configPath = path.join(STATE_DIR, 'openclaw.json');
+      const configContent = await fs.readFile(configPath, 'utf8');
+      const config = JSON.parse(configContent);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, config }, null, 2));
+    } catch (error) {
+      console.error('Debug config error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message }));
+    }
+    return;
+  }
+
+  // GET /skills/filesystem - List skills from filesystem
+  if (req.method === 'GET' && url.pathname === '/skills/filesystem') {
+    try {
+      const result = await listSkillsFromFilesystem();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      console.error('Filesystem skills error:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message, skills: [] }));
+    }
+    return;
+  }
+
+  // POST /skills/install - Install a new skill from SKILL.md content
+  if (req.method === 'POST' && url.pathname === '/skills/install') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { skillName, skillContent } = JSON.parse(body);
+        const result = await installSkill(skillName, skillContent);
+        res.writeHead(result.success ? 200 : 500, {
+          'Content-Type': 'application/json'
+        });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        console.error('Install skill error:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: error.message }));
+      }
+    });
+    return;
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
@@ -666,6 +865,14 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  /stats/activity - Get activity summary`);
   console.log(`   GET  /stats/cron - Get cron jobs list (cached)`);
   console.log(`   GET  /stats/skills - Get installed skills list (cached)`);
+  console.log(`   `);
+  console.log(`   Skills management:`);
+  console.log(`   GET  /skills/filesystem - List skills from filesystem`);
+  console.log(`   POST /skills/install - Install new skill (JSON: {skillName, skillContent})`);
+  console.log(`   `);
+  console.log(`   Debug endpoints:`);
+  console.log(`   GET  /debug/status - Get raw openclaw status output`);
+  console.log(`   GET  /debug/config - Get raw openclaw.json config`);
   console.log(`   `);
   console.log(`   💾 Status caching with lock (TTL: ${STATUS_CACHE_TTL / 1000}s) - prevents parallel executions`);
   console.log(`   🛡️  Buffer limits: 5MB (status), 2MB (logs/usage) - prevents memory overflow`);

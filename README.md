@@ -43,6 +43,10 @@ This template:
    - `/stats/activity` - Activity summary
    - `/stats/cron` - Cron jobs list (cached)
    - `/stats/skills` - Installed skills list (cached)
+   - `/skills/filesystem` - List skills from filesystem (workspace + managed)
+   - `/skills/install` - Install new skill from SKILL.md content
+   - `/debug/status` - Raw openclaw status JSON (for debugging)
+   - `/debug/config` - Raw openclaw.json config (for debugging)
 
    **Memory Optimization:**
    - Status data is cached for 30 seconds with request locking
@@ -52,6 +56,18 @@ This template:
    - 10-second timeouts on all commands to prevent hanging
    - Skills endpoint uses cached status (safe with locking), falls back to config file
    - Sessions, cron, and skills all share the same cached status data
+
+   **Skills Management:**
+   - Skills are stored as directories with `SKILL.md` files
+   - Workspace skills: `/data/workspace/skills/<skill-name>/SKILL.md`
+   - Managed skills: `/data/.openclaw/skills/<skill-name>/SKILL.md`
+   - Install new skills via POST to `/skills/install` with JSON body:
+     ```json
+     {
+       "skillName": "my-skill",
+       "skillContent": "---\nname: my-skill\ndescription: Does something\n---\n\nInstructions here..."
+     }
+     ```
 
 ## Build Time
 
