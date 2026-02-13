@@ -478,6 +478,7 @@ async function getMessageStats() {
         let sessionMessageCount = 0;
         let sessionEntryTypes = new Set();
         let firstMessageLogged = false;
+        let uniqueRoles = new Set(); // Track all unique role values
 
         for (const line of lines) {
           try {
@@ -529,6 +530,14 @@ async function getMessageStats() {
               // Count assistant messages separately
               // The message data is nested in entry.message!
               const msg = entry.message || entry;
+
+              // Track unique role values for debugging
+              if (msg.role) {
+                uniqueRoles.add(msg.role);
+              }
+              if (msg.author) {
+                uniqueRoles.add(`author:${msg.author}`);
+              }
 
               // Check multiple possible fields for role detection
               const isAssistant = msg.role === 'assistant' ||
@@ -606,6 +615,7 @@ async function getMessageStats() {
         }
 
         console.log(`      Found ${sessionMessageCount} messages, entry types: ${Array.from(sessionEntryTypes).join(', ')}`);
+        console.log(`      Unique roles in messages: ${Array.from(uniqueRoles).join(', ')}`);
       } catch (fileError) {
         // Session file doesn't exist or can't be read - skip it
         console.log(`⚠️  Could not read session file ${sessionId}:`, fileError.message);
