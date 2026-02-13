@@ -289,9 +289,6 @@ async function getActivitySummary() {
  */
 async function getMessageStats() {
   try {
-    console.log('🔍 Parsing session files for message statistics...');
-    console.log('   STATE_DIR:', STATE_DIR);
-
     // Try multiple possible session directory locations
     const possiblePaths = [
       path.join(STATE_DIR, 'agents', 'main', 'sessions'),
@@ -308,16 +305,14 @@ async function getMessageStats() {
         await fs.access(testPath);
         sessionsDir = testPath;
         sessionsJsonPath = path.join(testPath, 'sessions.json');
-        console.log(`✅ Found sessions directory at: ${sessionsDir}`);
         break;
       } catch (error) {
-        console.log(`   Tried: ${testPath} - not found`);
+        // Path not found, try next
       }
     }
 
     // If no sessions directory found
     if (!sessionsDir) {
-      console.log('⚠️  No sessions directory found in any expected location');
       return {
         success: true,
         messages: {
@@ -346,10 +341,8 @@ async function getMessageStats() {
     try {
       const files = await fs.readdir(sessionsDir);
       allSessionFiles = files.filter(f => f.endsWith('.jsonl'));
-      console.log(`   📊 Total session files for billing: ${allSessionFiles.length} JSONL files`);
-      console.log(`      (Includes active sessions + archived/old sessions)`);
     } catch (listError) {
-      console.log('   Could not list files:', listError.message);
+      // Could not list files
     }
 
     // Read sessions.json to get session metadata (if available)
@@ -360,7 +353,6 @@ async function getMessageStats() {
     try {
       const sessionsContent = await fs.readFile(sessionsJsonPath, 'utf8');
       sessionsData = JSON.parse(sessionsContent);
-      console.log(`   ✅ Found ${Object.keys(sessionsData).length} active sessions in sessions.json`);
 
       // Build reverse map: sessionId -> sessionKey
       for (const [sessionKey, sessionValue] of Object.entries(sessionsData)) {
@@ -375,7 +367,6 @@ async function getMessageStats() {
         }
       }
     } catch (error) {
-      console.log('   ⚠️  Could not read sessions.json (will process all JSONL files anyway):', error.message);
       // Continue without sessions.json - we'll still process all JSONL files
     }
 
@@ -411,11 +402,6 @@ async function getMessageStats() {
     // This includes:
     // - Active sessions (in sessions.json)
     // - Archived/old sessions (stopped but not deleted)
-    console.log(`\n💰 Processing ALL ${allSessionFiles.length} session files for billing...`);
-    console.log(`   Active sessions in sessions.json: ${Object.keys(sessionKeyMap).length}`);
-    console.log(`   Old/archived sessions: ${allSessionFiles.length - Object.keys(sessionKeyMap).length}`);
-
-    let firstAssistantLoggedGlobal = false;
 
     // Process each JSONL file
     for (const fileName of allSessionFiles) {
@@ -471,23 +457,11 @@ async function getMessageStats() {
           }
         }
 
-        const sessionType = isArchivedSession ? '[ARCHIVED]' : '[ACTIVE]';
-        const displayKey = sessionKey ? sessionKey.substring(0, 40) : sessionId.substring(0, 40);
-        console.log(`   ✅ ${sessionType} ${displayKey}... : ${lines.length} lines, channel: ${channel}`);
-
         let sessionMessageCount = 0;
-        let sessionEntryTypes = new Set();
-        let firstMessageLogged = false;
-        let uniqueRoles = new Set(); // Track all unique role values
 
         for (const line of lines) {
           try {
             const entry = JSON.parse(line);
-
-            // Track entry types for debugging
-            if (entry.type) {
-              sessionEntryTypes.add(entry.type);
-            }
 
             // Count tool_use entries separately (tool calls)
             if (entry.type === 'tool_use' || entry.type === 'tool_call') {
@@ -499,27 +473,6 @@ async function getMessageStats() {
               sessionMessageCount++;
               stats.messages.total++;
 
-              // Log first message structure for debugging
-              if (!firstMessageLogged && sessionMessageCount === 1) {
-                // Show all top-level keys to understand structure
-                console.log(`      📝 First message keys:`, Object.keys(entry));
-                console.log(`      📝 Nested message keys:`, entry.message ? Object.keys(entry.message) : 'no message field');
-                console.log(`      📝 Message structure:`, JSON.stringify({
-                  topLevel: {
-                    type: entry.type,
-                    role: entry.role,
-                    author: entry.author,
-                  },
-                  nested: entry.message ? {
-                    role: entry.message.role,
-                    author: entry.message.author,
-                    hasContent: !!entry.message.content,
-                    hasUsage: !!entry.message.usage
-                  } : null
-                }, null, 2));
-                firstMessageLogged = true;
-              }
-
               // Count by channel
               if (channel === 'telegram') {
                 stats.messages.telegram++;
@@ -530,14 +483,6 @@ async function getMessageStats() {
               // Count assistant messages separately
               // The message data is nested in entry.message!
               const msg = entry.message || entry;
-
-              // Track unique role values for debugging
-              if (msg.role) {
-                uniqueRoles.add(msg.role);
-              }
-              if (msg.author) {
-                uniqueRoles.add(`author:${msg.author}`);
-              }
 
               // Check multiple possible fields for role detection
               const isAssistant = msg.role === 'assistant' ||
@@ -561,29 +506,6 @@ async function getMessageStats() {
                   const cacheReadTokens = usage.cacheRead || usage.cache_read_input_tokens || 0;
                   const cacheWriteTokens = usage.cacheWrite || usage.cache_creation_input_tokens || 0;
 
-                  // Log first assistant message structure for debugging
-                  if (!firstAssistantLoggedGlobal) {
-                    console.log(`      🤖 First ASSISTANT message found! Role: ${msg.role || msg.author}`);
-                    console.log(`         Message keys:`, Object.keys(msg));
-                    console.log(`         Has usage:`, !!msg.usage);
-                    console.log(`         Usage object:`, JSON.stringify(msg.usage, null, 2));
-
-                    // Show what we'll extract
-                    const extractedCost = (typeof usage.cost === 'object' && usage.cost.total !== undefined)
-                      ? usage.cost.total
-                      : (typeof usage.cost === 'number' ? usage.cost : 0);
-
-                    console.log(`         ✅ Extracted values:`, {
-                      input: inputTokens,
-                      output: outputTokens,
-                      cacheRead: cacheReadTokens,
-                      cacheWrite: cacheWriteTokens,
-                      cost: extractedCost,
-                      costType: typeof usage.cost
-                    });
-                    firstAssistantLoggedGlobal = true;
-                  }
-
                   stats.tokens.input += inputTokens;
                   stats.tokens.output += outputTokens;
                   stats.tokens.cacheRead += cacheReadTokens;
@@ -601,9 +523,10 @@ async function getMessageStats() {
                     }
                   }
 
-                  // If no cost provided, calculate using Anthropic pricing
+                  // If no cost provided, calculate using Claude Sonnet 4.5 pricing
+                  // Note: Opus 4.6 pricing is $5/$25 per 1M tokens (not currently auto-detected)
                   if (messageCost === 0) {
-                    // Calculate cost (Anthropic pricing)
+                    // Claude Sonnet 4.5 pricing (as of 2026-02-14)
                     // Input: $3 per 1M tokens, Output: $15 per 1M tokens
                     // Cache read: $0.30 per 1M tokens, Cache write: $3.75 per 1M tokens
                     const inputCost = inputTokens * 3 / 1000000;
@@ -628,11 +551,8 @@ async function getMessageStats() {
           }
         }
 
-        console.log(`      Found ${sessionMessageCount} messages, entry types: ${Array.from(sessionEntryTypes).join(', ')}`);
-        console.log(`      Unique roles in messages: ${Array.from(uniqueRoles).join(', ')}`);
       } catch (fileError) {
         // Session file doesn't exist or can't be read - skip it
-        console.log(`⚠️  Could not read session file ${sessionId}:`, fileError.message);
         continue;
       }
     }
@@ -641,21 +561,6 @@ async function getMessageStats() {
     // Calculate total tokens
     stats.tokens.total = stats.tokens.input + stats.tokens.output +
                          stats.tokens.cacheRead + stats.tokens.cacheWrite;
-
-    console.log(`\n💰 ===== BILLING SUMMARY =====`);
-    console.log(`   📊 Sessions: ${stats.sessions.total} total (${stats.sessions.active} active, ${stats.sessions.archived} archived)`);
-    console.log(`   📨 Messages: ${stats.messages.total} (Telegram: ${stats.messages.telegram}, Web: ${stats.messages.web})`);
-    console.log(`   🤖 Assistant: ${stats.messages.assistant} messages (${stats.messages.total > 0 ? ((stats.messages.assistant / stats.messages.total) * 100).toFixed(1) : 0}%)`);
-    console.log(`   🔧 Tool calls: ${stats.toolCalls}`);
-    console.log(`   💵 Total cost: $${stats.cost.total.toFixed(4)} (Telegram: $${stats.cost.telegram.toFixed(4)}, Web: $${stats.cost.web.toFixed(4)})`);
-    console.log(`   🔢 Tokens: ${stats.tokens.total.toLocaleString()} (in: ${stats.tokens.input.toLocaleString()}, out: ${stats.tokens.output.toLocaleString()})`);
-
-    if (stats.messages.total === 0) {
-      console.log('⚠️  No messages found - this could mean:');
-      console.log('   1. No sessions.json or empty sessions');
-      console.log('   2. Session JSONL files have no entries with type="message"');
-      console.log('   3. Session files could not be read');
-    }
 
     return {
       success: true,
