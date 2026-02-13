@@ -342,9 +342,12 @@ async function getMessageStats() {
     }
 
     // List files in sessions directory for debugging
+    let allSessionFiles = [];
     try {
       const files = await fs.readdir(sessionsDir);
-      console.log(`   Files in sessions directory: ${files.join(', ')}`);
+      allSessionFiles = files.filter(f => f.endsWith('.jsonl'));
+      console.log(`   Total JSONL files in sessions directory: ${allSessionFiles.length}`);
+      console.log(`   Files: ${files.join(', ')}`);
     } catch (listError) {
       console.log('   Could not list files:', listError.message);
     }
@@ -396,7 +399,28 @@ async function getMessageStats() {
 
     // Parse each session file
     const sessionEntries = Object.entries(sessionsData);
-    console.log(`📊 Found ${sessionEntries.length} sessions to parse`);
+    console.log(`📊 Found ${sessionEntries.length} sessions in sessions.json`);
+    console.log(`📊 Found ${allSessionFiles.length} total JSONL files`);
+
+    // Check if there are orphaned session files not in sessions.json
+    const sessionIdsInJson = new Set();
+    sessionEntries.forEach(([key, value]) => {
+      let sessionId;
+      if (typeof value === 'string') {
+        sessionId = value;
+      } else if (typeof value === 'object' && value !== null) {
+        sessionId = value.sessionId || value.id || value.key;
+      }
+      if (sessionId) {
+        sessionIdsInJson.add(`${sessionId}.jsonl`);
+      }
+    });
+
+    const orphanedFiles = allSessionFiles.filter(f => !sessionIdsInJson.has(f));
+    if (orphanedFiles.length > 0) {
+      console.log(`⚠️  Found ${orphanedFiles.length} session files NOT in sessions.json:`, orphanedFiles.join(', '));
+      console.log(`   These files will be processed as "unknown" channel`);
+    }
 
     for (const [sessionKey, sessionValue] of sessionEntries) {
       // sessionValue might be a string (sessionId) or an object with sessionId property
@@ -417,18 +441,39 @@ async function getMessageStats() {
 
       const sessionFilePath = path.join(sessionsDir, `${sessionId}.jsonl`);
 
-      // Detect channel from session key
-      const isTelegram = sessionKey.toLowerCase().includes('telegram') ||
-                         sessionKey.toLowerCase().includes('tg');
-      const channel = isTelegram ? 'telegram' : 'web';
+      // Detect channel from session key (initial guess)
+      let channel = 'web'; // default
+      if (sessionKey.toLowerCase().includes('telegram') || sessionKey.toLowerCase().includes('tg')) {
+        channel = 'telegram';
+      } else if (sessionKey.toLowerCase().includes('web')) {
+        channel = 'web';
+      }
 
       try {
         const content = await fs.readFile(sessionFilePath, 'utf8');
         const lines = content.trim().split('\n').filter(line => line);
+
+        // Try to detect channel from first line (session metadata)
+        if (lines.length > 0) {
+          try {
+            const firstEntry = JSON.parse(lines[0]);
+            if (firstEntry.type === 'session') {
+              // Check for telegram indicators in session metadata
+              const sessionStr = JSON.stringify(firstEntry).toLowerCase();
+              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"')) {
+                channel = 'telegram';
+              }
+            }
+          } catch (e) {
+            // Ignore parse errors on first line
+          }
+        }
+
         console.log(`   ✅ Reading session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
 
         let sessionMessageCount = 0;
         let sessionEntryTypes = new Set();
+        let firstMessageLogged = false;
 
         for (const line of lines) {
           try {
@@ -444,6 +489,21 @@ async function getMessageStats() {
               sessionMessageCount++;
               stats.messages.total++;
 
+              // Log first message structure for debugging
+              if (!firstMessageLogged && sessionMessageCount === 1) {
+                // Show all top-level keys to understand structure
+                console.log(`      📝 First message keys:`, Object.keys(entry));
+                console.log(`      📝 First message sample:`, JSON.stringify({
+                  type: entry.type,
+                  role: entry.role,
+                  author: entry.author,
+                  hasUsage: !!entry.usage,
+                  hasContent: !!entry.content,
+                  hasMessage: !!entry.message
+                }, null, 2));
+                firstMessageLogged = true;
+              }
+
               // Count by channel
               if (channel === 'telegram') {
                 stats.messages.telegram++;
@@ -452,13 +512,21 @@ async function getMessageStats() {
               }
 
               // Count assistant messages separately
-              if (entry.role === 'assistant') {
+              // Check multiple possible fields for role detection
+              const isAssistant = entry.role === 'assistant' ||
+                                  entry.author === 'assistant' ||
+                                  entry.role === 'ai' ||
+                                  entry.author === 'ai' ||
+                                  (entry.message && entry.message.role === 'assistant');
+
+              if (isAssistant) {
                 stats.messages.assistant++;
 
                 // Extract cost and token data from usage field
-                if (entry.usage) {
-                  const usage = entry.usage;
+                // Usage might be at top level or nested in message
+                const usage = entry.usage || (entry.message && entry.message.usage);
 
+                if (usage) {
                   // Token counts
                   if (usage.input_tokens) {
                     stats.tokens.input += usage.input_tokens;
@@ -503,6 +571,95 @@ async function getMessageStats() {
         // Session file doesn't exist or can't be read - skip it
         console.log(`⚠️  Could not read session file ${sessionId}:`, fileError.message);
         continue;
+      }
+    }
+
+    // Process orphaned session files (not in sessions.json)
+    // These might be old Telegram sessions
+    if (orphanedFiles.length > 0) {
+      console.log(`\n📊 Processing ${orphanedFiles.length} orphaned session files...`);
+
+      for (const fileName of orphanedFiles) {
+        const sessionId = fileName.replace('.jsonl', '');
+        const sessionFilePath = path.join(sessionsDir, fileName);
+        let channel = 'unknown';
+
+        try {
+          const content = await fs.readFile(sessionFilePath, 'utf8');
+          const lines = content.trim().split('\n').filter(line => line);
+
+          // Try to detect channel from first line
+          if (lines.length > 0) {
+            try {
+              const firstEntry = JSON.parse(lines[0]);
+              const sessionStr = JSON.stringify(firstEntry).toLowerCase();
+              if (sessionStr.includes('telegram') || sessionStr.includes('"tg"')) {
+                channel = 'telegram';
+              } else if (sessionStr.includes('web')) {
+                channel = 'web';
+              }
+            } catch (e) {
+              // Keep as unknown
+            }
+          }
+
+          console.log(`   ✅ Reading orphaned session ${sessionId}: ${lines.length} lines, channel: ${channel}`);
+
+          let sessionMessageCount = 0;
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+
+              if (entry.type === 'message') {
+                sessionMessageCount++;
+                stats.messages.total++;
+
+                if (channel === 'telegram') {
+                  stats.messages.telegram++;
+                } else if (channel === 'web') {
+                  stats.messages.web++;
+                }
+
+                const isAssistant = entry.role === 'assistant' ||
+                                    entry.author === 'assistant' ||
+                                    entry.role === 'ai' ||
+                                    entry.author === 'ai' ||
+                                    (entry.message && entry.message.role === 'assistant');
+
+                if (isAssistant) {
+                  stats.messages.assistant++;
+
+                  const usage = entry.usage || (entry.message && entry.message.usage);
+                  if (usage) {
+                    stats.tokens.input += usage.input_tokens || 0;
+                    stats.tokens.output += usage.output_tokens || 0;
+                    stats.tokens.cacheRead += usage.cache_read_input_tokens || 0;
+                    stats.tokens.cacheWrite += usage.cache_creation_input_tokens || 0;
+
+                    const inputCost = (usage.input_tokens || 0) * 3 / 1000000;
+                    const outputCost = (usage.output_tokens || 0) * 15 / 1000000;
+                    const cacheReadCost = (usage.cache_read_input_tokens || 0) * 0.30 / 1000000;
+                    const cacheWriteCost = (usage.cache_creation_input_tokens || 0) * 3.75 / 1000000;
+                    const messageCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+
+                    stats.cost.total += messageCost;
+                    if (channel === 'telegram') {
+                      stats.cost.telegram += messageCost;
+                    } else if (channel === 'web') {
+                      stats.cost.web += messageCost;
+                    }
+                  }
+                }
+              }
+            } catch (parseError) {
+              continue;
+            }
+          }
+
+          console.log(`      Found ${sessionMessageCount} messages in orphaned file`);
+        } catch (fileError) {
+          console.log(`⚠️  Could not read orphaned file ${fileName}:`, fileError.message);
+        }
       }
     }
 
