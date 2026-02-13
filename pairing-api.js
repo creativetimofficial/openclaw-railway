@@ -402,6 +402,8 @@ async function getMessageStats() {
     console.log(`📊 Found ${sessionEntries.length} sessions in sessions.json`);
     console.log(`📊 Found ${allSessionFiles.length} total JSONL files`);
 
+    let firstAssistantLoggedGlobal = false;
+
     // Check if there are orphaned session files not in sessions.json
     const sessionIdsInJson = new Set();
     sessionEntries.forEach(([key, value]) => {
@@ -534,6 +536,23 @@ async function getMessageStats() {
 
               if (isAssistant) {
                 stats.messages.assistant++;
+
+                // Log first assistant message structure for debugging
+                if (!firstAssistantLoggedGlobal) {
+                  console.log(`      🤖 First ASSISTANT message found! Role: ${msg.role || msg.author}`);
+                  console.log(`         Keys:`, Object.keys(msg));
+                  console.log(`         Has usage:`, !!msg.usage);
+                  if (msg.usage) {
+                    console.log(`         Usage keys:`, Object.keys(msg.usage));
+                    console.log(`         Token counts:`, {
+                      input: msg.usage.input_tokens,
+                      output: msg.usage.output_tokens,
+                      cacheRead: msg.usage.cache_read_input_tokens,
+                      cacheWrite: msg.usage.cache_creation_input_tokens
+                    });
+                  }
+                  firstAssistantLoggedGlobal = true;
+                }
 
                 // Extract cost and token data from usage field
                 // Usage is in the nested message object
