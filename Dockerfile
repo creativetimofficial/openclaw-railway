@@ -15,7 +15,7 @@ WORKDIR /app
 RUN mkdir -p /data/.openclaw /data/workspace
 
 # Install OpenClaw via npm (clean, no TTY issues)
-RUN npm install -g openclaw@2026.2.6 && \
+RUN npm install -g openclaw@2026.2.15 && \
     echo "✓ OpenClaw $(openclaw --version) installed successfully"
 
 # Environment defaults
