@@ -73,8 +73,15 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.gateway.auth.mode = 'token';
       config.gateway.auth.token = process.env.PAIRING_API_SECRET;
 
-      // Note: AI model is configured via ANTHROPIC_MODEL environment variable
-      // The 'llm' config key is deprecated in OpenClaw 2.15+
+      // Set default AI model (OpenClaw 2.15+ config format)
+      // Model is set in config, but reads from ANTHROPIC_MODEL env var for flexibility
+      if (!config.agents) config.agents = {};
+      if (!config.agents.defaults) config.agents.defaults = {};
+      config.agents.defaults.model = {
+        primary: process.env.ANTHROPIC_MODEL
+          ? 'anthropic/' + process.env.ANTHROPIC_MODEL
+          : 'anthropic/claude-sonnet-4-5-20250929'
+      };
 
       // Write config
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
@@ -110,18 +117,39 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
 else
   echo "ℹ️  Already onboarded, skipping setup"
 
-  # Migration: Remove deprecated 'llm' key from config (OpenClaw 2.15+ doesn't support it)
+  # Migration: Update config for OpenClaw 2.15+ compatibility
   echo "🔄 Running config migration..."
   node -e "
     const fs = require('fs');
     const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
     try {
       let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      let needsUpdate = false;
 
       // Remove deprecated 'llm' key if it exists
       if (config.llm) {
         console.log('⚠️  Found deprecated llm config key, removing...');
         delete config.llm;
+        needsUpdate = true;
+      }
+
+      // Set agents.defaults.model if missing or needs update
+      if (!config.agents) config.agents = {};
+      if (!config.agents.defaults) config.agents.defaults = {};
+
+      const expectedModel = process.env.ANTHROPIC_MODEL
+        ? 'anthropic/' + process.env.ANTHROPIC_MODEL
+        : 'anthropic/claude-sonnet-4-5-20250929';
+
+      if (!config.agents.defaults.model || config.agents.defaults.model.primary !== expectedModel) {
+        console.log('🔧 Setting AI model to:', expectedModel);
+        config.agents.defaults.model = {
+          primary: expectedModel
+        };
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
         console.log('✅ Config migrated successfully');
       } else {
