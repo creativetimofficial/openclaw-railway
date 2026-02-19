@@ -73,9 +73,8 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.gateway.auth.mode = 'token';
       config.gateway.auth.token = process.env.PAIRING_API_SECRET;
 
-      // Set default AI model to Claude Sonnet 4.5
-      if (!config.llm) config.llm = {};
-      config.llm.defaultModel = 'claude-sonnet-4-5-20250929';
+      // Note: AI model is configured via ANTHROPIC_MODEL environment variable
+      // The 'llm' config key is deprecated in OpenClaw 2.15+
 
       // Write config
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
@@ -110,6 +109,28 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   sleep 2
 else
   echo "ℹ️  Already onboarded, skipping setup"
+
+  # Migration: Remove deprecated 'llm' key from config (OpenClaw 2.15+ doesn't support it)
+  echo "🔄 Running config migration..."
+  node -e "
+    const fs = require('fs');
+    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
+    try {
+      let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+      // Remove deprecated 'llm' key if it exists
+      if (config.llm) {
+        console.log('⚠️  Found deprecated llm config key, removing...');
+        delete config.llm;
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+        console.log('✅ Config migrated successfully');
+      } else {
+        console.log('✅ Config already up to date');
+      }
+    } catch (err) {
+      console.log('⚠️  Could not migrate config:', err.message);
+    }
+  "
 fi
 
 # Start Stats API on port 8081 (includes /health endpoint)
