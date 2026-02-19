@@ -149,6 +149,19 @@ else
         needsUpdate = true;
       }
 
+      // Update Telegram bot token if it's PLACEHOLDER (warm instance reconfiguration)
+      if (!config.channels) config.channels = {};
+      if (!config.channels.telegram) config.channels.telegram = {};
+
+      const currentBotToken = config.channels.telegram.botToken;
+      const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
+
+      if (currentBotToken === 'PLACEHOLDER' && envBotToken && envBotToken !== 'PLACEHOLDER') {
+        console.log('🔧 Updating Telegram bot token from PLACEHOLDER to real token');
+        config.channels.telegram.botToken = envBotToken;
+        needsUpdate = true;
+      }
+
       if (needsUpdate) {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
         console.log('✅ Config migrated successfully');
