@@ -133,7 +133,9 @@ else
         needsUpdate = true;
       }
 
-      // Set agents.defaults.model if missing or needs update
+      // Sync AI model from environment variable (source of truth)
+      // Note: This will overwrite manual config edits. To change the model,
+      // update the ANTHROPIC_MODEL environment variable in Railway dashboard.
       if (!config.agents) config.agents = {};
       if (!config.agents.defaults) config.agents.defaults = {};
 
@@ -141,8 +143,14 @@ else
         ? 'anthropic/' + process.env.ANTHROPIC_MODEL
         : 'anthropic/claude-sonnet-4-5-20250929';
 
-      if (!config.agents.defaults.model || config.agents.defaults.model.primary !== expectedModel) {
-        console.log('🔧 Setting AI model to:', expectedModel);
+      const currentModel = config.agents.defaults.model?.primary;
+
+      // Always sync config to match env var (env var is source of truth)
+      if (!currentModel || currentModel !== expectedModel) {
+        console.log('🔧 Syncing AI model from env var:', expectedModel);
+        if (currentModel && currentModel !== expectedModel) {
+          console.log('   Previous model:', currentModel);
+        }
         config.agents.defaults.model = {
           primary: expectedModel
         };
