@@ -73,9 +73,15 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
       config.gateway.auth.mode = 'token';
       config.gateway.auth.token = process.env.PAIRING_API_SECRET;
 
-      // Set default AI model to Claude Sonnet 4.5
-      if (!config.llm) config.llm = {};
-      config.llm.defaultModel = 'claude-sonnet-4-5-20250929';
+      // Set default AI model (OpenClaw 2.15+ config format)
+      // Model is set in config, but reads from ANTHROPIC_MODEL env var for flexibility
+      if (!config.agents) config.agents = {};
+      if (!config.agents.defaults) config.agents.defaults = {};
+      config.agents.defaults.model = {
+        primary: process.env.ANTHROPIC_MODEL
+          ? 'anthropic/' + process.env.ANTHROPIC_MODEL
+          : 'anthropic/claude-sonnet-4-5-20250929'
+      };
 
       // Write config
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
@@ -110,6 +116,70 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
   sleep 2
 else
   echo "ℹ️  Already onboarded, skipping setup"
+
+  # Migration: Update config for OpenClaw 2.15+ compatibility
+  echo "🔄 Running config migration..."
+  node -e "
+    const fs = require('fs');
+    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
+    try {
+      let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      let needsUpdate = false;
+
+      // Remove deprecated 'llm' key if it exists
+      if (config.llm) {
+        console.log('⚠️  Found deprecated llm config key, removing...');
+        delete config.llm;
+        needsUpdate = true;
+      }
+
+      // Sync AI model from environment variable (source of truth)
+      // Note: This will overwrite manual config edits. To change the model,
+      // update the ANTHROPIC_MODEL environment variable in Railway dashboard.
+      if (!config.agents) config.agents = {};
+      if (!config.agents.defaults) config.agents.defaults = {};
+
+      const expectedModel = process.env.ANTHROPIC_MODEL
+        ? 'anthropic/' + process.env.ANTHROPIC_MODEL
+        : 'anthropic/claude-sonnet-4-5-20250929';
+
+      const currentModel = config.agents.defaults.model?.primary;
+
+      // Always sync config to match env var (env var is source of truth)
+      if (!currentModel || currentModel !== expectedModel) {
+        console.log('🔧 Syncing AI model from env var:', expectedModel);
+        if (currentModel && currentModel !== expectedModel) {
+          console.log('   Previous model:', currentModel);
+        }
+        config.agents.defaults.model = {
+          primary: expectedModel
+        };
+        needsUpdate = true;
+      }
+
+      // Update Telegram bot token if it's PLACEHOLDER (warm instance reconfiguration)
+      if (!config.channels) config.channels = {};
+      if (!config.channels.telegram) config.channels.telegram = {};
+
+      const currentBotToken = config.channels.telegram.botToken;
+      const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
+
+      if (currentBotToken === 'PLACEHOLDER' && envBotToken && envBotToken !== 'PLACEHOLDER') {
+        console.log('🔧 Updating Telegram bot token from PLACEHOLDER to real token');
+        config.channels.telegram.botToken = envBotToken;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+        console.log('✅ Config migrated successfully');
+      } else {
+        console.log('✅ Config already up to date');
+      }
+    } catch (err) {
+      console.log('⚠️  Could not migrate config:', err.message);
+    }
+  "
 fi
 
 # Start Stats API on port 8081 (includes /health endpoint)

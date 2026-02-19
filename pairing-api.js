@@ -111,8 +111,8 @@ async function proxyChatRequest(body, isStreaming = false) {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${API_SECRET}`,
-        'Content-Type': 'application/json',
-        'Content-Length': data.length
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(data, 'utf8')
       }
     };
 
