@@ -337,12 +337,12 @@ GATEWAY_PID=$!
 echo "⏳ Waiting for gateway to initialize (30 seconds)..."
 sleep 30
 
-# Health check: Test /chat endpoint with authentication
-echo "🏥 Running /chat endpoint health check..."
-HEALTH_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:18789/chat \
+# Health check: Test /v1/chat/completions endpoint with authentication
+echo "🏥 Running /v1/chat/completions endpoint health check..."
+HEALTH_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:18789/v1/chat/completions \
   -H "Authorization: Bearer ${PAIRING_API_SECRET}" \
   -H "Content-Type: application/json" \
-  -d '{"model":"openclaw:main","messages":[{"role":"user","content":"health check"}],"user":"health"}' \
+  -d '{"model":"openclaw:main","messages":[{"role":"user","content":"health check"}]}' \
   2>&1)
 
 HTTP_CODE=$(echo "$HEALTH_CHECK_RESPONSE" | tail -n 1)
@@ -350,15 +350,15 @@ RESPONSE_BODY=$(echo "$HEALTH_CHECK_RESPONSE" | head -n -1)
 
 echo "📊 Health check response: HTTP $HTTP_CODE"
 
-# Check if /chat endpoint is accessible
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "400" ]; then
-  # 200 = success, 400 = validation error (but endpoint is working)
-  echo "✅ /chat endpoint is responding correctly!"
+# Check if /v1/chat/completions endpoint is accessible
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "422" ]; then
+  # 200 = success, 400/422 = validation error (but endpoint is working)
+  echo "✅ /v1/chat/completions endpoint is responding correctly!"
   echo "   Status: $HTTP_CODE"
   echo "   Gateway is healthy and ready to accept requests"
 else
-  echo "❌ CRITICAL: /chat endpoint health check failed!"
-  echo "   Expected: HTTP 200 or 400 (validation error)"
+  echo "❌ CRITICAL: /v1/chat/completions endpoint health check failed!"
+  echo "   Expected: HTTP 200, 400, or 422"
   echo "   Got: HTTP $HTTP_CODE"
   echo "   Response: $RESPONSE_BODY"
   echo ""
