@@ -177,12 +177,21 @@ else
         needsUpdate = true;
       }
 
-      // Ensure gateway authentication is configured
+      // Ensure gateway authentication is configured and synced from env var
       if (!config.gateway.auth) config.gateway.auth = {};
-      if (!config.gateway.auth.mode || !config.gateway.auth.token) {
-        console.log('🔧 Configuring gateway authentication');
+
+      const expectedAuthToken = process.env.PAIRING_API_SECRET;
+      const currentAuthToken = config.gateway.auth.token;
+
+      // Always sync gateway auth token from env var (env var is source of truth)
+      if (!config.gateway.auth.mode || currentAuthToken !== expectedAuthToken) {
+        console.log('🔧 Syncing gateway authentication from environment');
+        if (currentAuthToken && currentAuthToken !== expectedAuthToken) {
+          console.log('   Previous token:', currentAuthToken?.substring(0, 20) + '...');
+          console.log('   New token:', expectedAuthToken?.substring(0, 20) + '...');
+        }
         config.gateway.auth.mode = 'token';
-        config.gateway.auth.token = process.env.PAIRING_API_SECRET;
+        config.gateway.auth.token = expectedAuthToken;
         needsUpdate = true;
       }
 
