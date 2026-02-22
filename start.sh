@@ -319,6 +319,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Cleanup stale lock files from previous crashes
+echo "🧹 Cleaning up stale lock files..."
+find "$OPENCLAW_STATE_DIR" -name "*.lock" -type f -delete 2>/dev/null || true
+echo "✅ Lock files cleaned"
+
 echo "🌐 Starting OpenClaw gateway on port 18789..."
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
   echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
