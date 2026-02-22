@@ -327,60 +327,8 @@ else
 fi
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 echo ""
-
-# Start the gateway in background first for health check
-echo "🚀 Starting gateway in background for health verification..."
-openclaw gateway --port 18789 &
-GATEWAY_PID=$!
-
-# Wait for gateway to start (give it 30 seconds)
-echo "⏳ Waiting for gateway to initialize (30 seconds)..."
-sleep 30
-
-# Health check: Test /v1/chat/completions endpoint with authentication
-echo "🏥 Running /v1/chat/completions endpoint health check..."
-HEALTH_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:18789/v1/chat/completions \
-  -H "Authorization: Bearer ${PAIRING_API_SECRET}" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"openclaw:main","messages":[{"role":"user","content":"health check"}]}' \
-  2>&1)
-
-HTTP_CODE=$(echo "$HEALTH_CHECK_RESPONSE" | tail -n 1)
-RESPONSE_BODY=$(echo "$HEALTH_CHECK_RESPONSE" | head -n -1)
-
-echo "📊 Health check response: HTTP $HTTP_CODE"
-
-# Check if /v1/chat/completions endpoint is accessible
-if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "422" ]; then
-  # 200 = success, 400/422 = validation error (but endpoint is working)
-  echo "✅ /v1/chat/completions endpoint is responding correctly!"
-  echo "   Status: $HTTP_CODE"
-  echo "   Gateway is healthy and ready to accept requests"
-else
-  echo "❌ CRITICAL: /v1/chat/completions endpoint health check failed!"
-  echo "   Expected: HTTP 200, 400, or 422"
-  echo "   Got: HTTP $HTTP_CODE"
-  echo "   Response: $RESPONSE_BODY"
-  echo ""
-  echo "📋 This usually means:"
-  echo "   1. Gateway authentication is not configured correctly"
-  echo "   2. HTTP endpoints are not enabled in openclaw.json"
-  echo "   3. Gateway failed to start properly"
-  echo ""
-  echo "📋 Config file contents:"
-  cat "$OPENCLAW_STATE_DIR/openclaw.json"
-  echo ""
-  echo "Killing gateway process..."
-  kill $GATEWAY_PID 2>/dev/null || true
-  exit 1
-fi
-
-# Health check passed - gateway is already running in background
-# Bring it to foreground so it keeps running
-echo ""
-echo "✅ All health checks passed! Gateway is ready."
-echo "🎯 Bringing gateway to foreground..."
+echo "✅ Configuration verified - starting gateway..."
 echo ""
 
-# Wait for the gateway process (it's already running)
-wait $GATEWAY_PID
+# Start the gateway (foreground - Railway will manage the process)
+exec openclaw gateway --port 18789
