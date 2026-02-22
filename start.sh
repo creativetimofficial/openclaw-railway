@@ -254,12 +254,53 @@ node -e "
     console.log('ℹ️  Telegram channel is not configured (optional)');
   }
 
-  // Check gateway configuration (required)
+  // Check gateway configuration (required) - DETAILED VERIFICATION
+  console.log('🔍 Verifying gateway configuration...');
+
+  // 1. Check HTTP endpoints exist
   if (!config.gateway?.http?.endpoints) {
-    console.error('❌ CRITICAL: Gateway HTTP endpoints not configured!');
+    console.error('❌ CRITICAL: config.gateway.http.endpoints is missing!');
+    console.error('   Expected structure: { chatCompletions: { enabled: true }, responses: { enabled: true } }');
     process.exit(1);
   }
-  console.log('✅ Gateway HTTP endpoints configured');
+
+  // 2. Check chatCompletions endpoint
+  if (!config.gateway.http.endpoints.chatCompletions?.enabled) {
+    console.error('❌ CRITICAL: chatCompletions endpoint not enabled!');
+    console.error('   Current value:', JSON.stringify(config.gateway.http.endpoints.chatCompletions));
+    console.error('   Required: { enabled: true }');
+    process.exit(1);
+  }
+
+  // 3. Check responses endpoint
+  if (!config.gateway.http.endpoints.responses?.enabled) {
+    console.error('❌ CRITICAL: responses endpoint not enabled!');
+    console.error('   Current value:', JSON.stringify(config.gateway.http.endpoints.responses));
+    console.error('   Required: { enabled: true }');
+    process.exit(1);
+  }
+
+  // 4. Check gateway auth
+  if (!config.gateway.auth?.mode || !config.gateway.auth?.token) {
+    console.error('❌ CRITICAL: Gateway authentication not configured!');
+    console.error('   Current auth:', JSON.stringify(config.gateway.auth));
+    console.error('   Required: { mode: "token", token: "..." }');
+    process.exit(1);
+  }
+
+  // 5. Verify auth token matches env var
+  if (config.gateway.auth.token !== process.env.PAIRING_API_SECRET) {
+    console.error('❌ CRITICAL: Gateway auth token mismatch!');
+    console.error('   Config token:', config.gateway.auth.token?.substring(0, 20) + '...');
+    console.error('   Env var token:', process.env.PAIRING_API_SECRET?.substring(0, 20) + '...');
+    process.exit(1);
+  }
+
+  console.log('✅ Gateway HTTP endpoints verified:');
+  console.log('   - chatCompletions: enabled');
+  console.log('   - responses: enabled');
+  console.log('   - auth mode: ' + config.gateway.auth.mode);
+  console.log('   - auth token: ' + config.gateway.auth.token.substring(0, 15) + '...');
 "
 
 if [ $? -ne 0 ]; then
@@ -277,8 +318,60 @@ else
 fi
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 echo ""
-echo "⚠️  IMPORTANT: Gateway will now start. Watch for initialization in logs."
+
+# Start the gateway in background first for health check
+echo "🚀 Starting gateway in background for health verification..."
+openclaw gateway --port 18789 &
+GATEWAY_PID=$!
+
+# Wait for gateway to start (give it 30 seconds)
+echo "⏳ Waiting for gateway to initialize (30 seconds)..."
+sleep 30
+
+# Health check: Test /chat endpoint with authentication
+echo "🏥 Running /chat endpoint health check..."
+HEALTH_CHECK_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:18789/chat \
+  -H "Authorization: Bearer ${PAIRING_API_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openclaw:main","messages":[{"role":"user","content":"health check"}],"user":"health"}' \
+  2>&1)
+
+HTTP_CODE=$(echo "$HEALTH_CHECK_RESPONSE" | tail -n 1)
+RESPONSE_BODY=$(echo "$HEALTH_CHECK_RESPONSE" | head -n -1)
+
+echo "📊 Health check response: HTTP $HTTP_CODE"
+
+# Check if /chat endpoint is accessible
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "400" ]; then
+  # 200 = success, 400 = validation error (but endpoint is working)
+  echo "✅ /chat endpoint is responding correctly!"
+  echo "   Status: $HTTP_CODE"
+  echo "   Gateway is healthy and ready to accept requests"
+else
+  echo "❌ CRITICAL: /chat endpoint health check failed!"
+  echo "   Expected: HTTP 200 or 400 (validation error)"
+  echo "   Got: HTTP $HTTP_CODE"
+  echo "   Response: $RESPONSE_BODY"
+  echo ""
+  echo "📋 This usually means:"
+  echo "   1. Gateway authentication is not configured correctly"
+  echo "   2. HTTP endpoints are not enabled in openclaw.json"
+  echo "   3. Gateway failed to start properly"
+  echo ""
+  echo "📋 Config file contents:"
+  cat "$OPENCLAW_STATE_DIR/openclaw.json"
+  echo ""
+  echo "Killing gateway process..."
+  kill $GATEWAY_PID 2>/dev/null || true
+  exit 1
+fi
+
+# Health check passed - gateway is already running in background
+# Bring it to foreground so it keeps running
+echo ""
+echo "✅ All health checks passed! Gateway is ready."
+echo "🎯 Bringing gateway to foreground..."
 echo ""
 
-# Start the gateway in Docker mode (foreground, no systemd)
-exec openclaw gateway --port 18789
+# Wait for the gateway process (it's already running)
+wait $GATEWAY_PID
