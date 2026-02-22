@@ -14,7 +14,11 @@ mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"
 echo "📋 Environment check:"
 echo "   OPENCLAW_STATE_DIR: $OPENCLAW_STATE_DIR"
 echo "   OPENCLAW_WORKSPACE_DIR: $OPENCLAW_WORKSPACE_DIR"
-echo "   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:0:15}..."
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  echo "   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:0:15}..."
+else
+  echo "   TELEGRAM_BOT_TOKEN: (not configured)"
+fi
 echo "   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:0:15}..."
 
 # Check if already onboarded
@@ -33,27 +37,28 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
 
   echo "✅ Onboarding complete!"
 
-  # Configure Telegram channel properly
-  echo "🔧 Configuring Telegram channel..."
+  # Configure Telegram channel properly (ONLY if token is provided)
+  if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+    echo "🔧 Configuring Telegram channel..."
 
-  # Use OpenClaw's built-in config method instead of manual JSON editing
-  node -e "
-    const fs = require('fs');
-    const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
-    try {
-      let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    # Use OpenClaw's built-in config method instead of manual JSON editing
+    node -e "
+      const fs = require('fs');
+      const configPath = process.env.OPENCLAW_STATE_DIR + '/openclaw.json';
+      try {
+        let config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-      // Ensure channels object exists
-      if (!config.channels) config.channels = {};
-      if (!config.channels.telegram) config.channels.telegram = {};
+        // Ensure channels object exists
+        if (!config.channels) config.channels = {};
+        if (!config.channels.telegram) config.channels.telegram = {};
 
-      // Enable the Telegram channel with bot token (pairing mode for security)
-      config.channels.telegram = {
-        enabled: true,
-        botToken: process.env.TELEGRAM_BOT_TOKEN,
-        dmPolicy: 'pairing',
-        allowFrom: []
-      };
+        // Enable the Telegram channel with bot token (pairing mode for security)
+        config.channels.telegram = {
+          enabled: true,
+          botToken: process.env.TELEGRAM_BOT_TOKEN,
+          dmPolicy: 'pairing',
+          allowFrom: []
+        };
 
       // Enable HTTP endpoints for web chat interface
       if (!config.gateway) config.gateway = {};
@@ -83,37 +88,40 @@ if [ ! -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
           : 'anthropic/claude-sonnet-4-5-20250929'
       };
 
-      // Write config
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+        // Write config
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 
-      // Verify it was written
-      const verify = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      if (verify.channels && verify.channels.telegram && verify.channels.telegram.enabled) {
-        console.log('✅ Telegram channel enabled successfully');
-        console.log('   DM Policy: pairing (manual approval required)');
-        console.log('   Bot Token: ' + process.env.TELEGRAM_BOT_TOKEN.substring(0, 10) + '...');
-      } else {
-        console.log('⚠️  WARNING: Telegram channel may not be enabled!');
+        // Verify it was written
+        const verify = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (verify.channels && verify.channels.telegram && verify.channels.telegram.enabled) {
+          console.log('✅ Telegram channel enabled successfully');
+          console.log('   DM Policy: pairing (manual approval required)');
+          console.log('   Bot Token: ' + process.env.TELEGRAM_BOT_TOKEN.substring(0, 10) + '...');
+        } else {
+          console.log('⚠️  WARNING: Telegram channel may not be enabled!');
+        }
+      } catch (err) {
+        console.log('❌ Could not enable Telegram channel:', err.message);
+        process.exit(1);
       }
-    } catch (err) {
-      console.log('❌ Could not enable Telegram channel:', err.message);
-      process.exit(1);
-    }
-  "
+    "
 
-  if [ $? -ne 0 ]; then
-    echo "❌ Failed to configure Telegram. Exiting."
-    exit 1
+    if [ $? -ne 0 ]; then
+      echo "❌ Failed to configure Telegram. Exiting."
+      exit 1
+    fi
+
+    echo "🔐 Using pairing mode - users need approval before chatting"
+
+    # Run doctor to properly enable Telegram channel
+    echo "🩺 Running openclaw doctor --fix to enable Telegram channel..."
+    openclaw doctor --fix || echo "⚠️  Doctor completed with warnings (this is normal)"
+
+    echo "⏳ Waiting for config to stabilize..."
+    sleep 2
+  else
+    echo "ℹ️  Telegram not configured - you can add it later through the chat interface"
   fi
-
-  echo "🔐 Using pairing mode - users need approval before chatting"
-
-  # Run doctor to properly enable Telegram channel
-  echo "🩺 Running openclaw doctor --fix to enable Telegram channel..."
-  openclaw doctor --fix || echo "⚠️  Doctor completed with warnings (this is normal)"
-
-  echo "⏳ Waiting for config to stabilize..."
-  sleep 2
 else
   echo "ℹ️  Already onboarded, skipping setup"
 
@@ -157,17 +165,38 @@ else
         needsUpdate = true;
       }
 
-      // Update Telegram bot token if it's PLACEHOLDER (warm instance reconfiguration)
-      if (!config.channels) config.channels = {};
-      if (!config.channels.telegram) config.channels.telegram = {};
-
-      const currentBotToken = config.channels.telegram.botToken;
+      // Update Telegram bot token if provided (warm instance reconfiguration)
       const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
 
-      if (currentBotToken === 'PLACEHOLDER' && envBotToken && envBotToken !== 'PLACEHOLDER') {
-        console.log('🔧 Updating Telegram bot token from PLACEHOLDER to real token');
-        config.channels.telegram.botToken = envBotToken;
-        needsUpdate = true;
+      if (envBotToken && envBotToken !== 'PLACEHOLDER' && envBotToken.length > 0) {
+        if (!config.channels) config.channels = {};
+        if (!config.channels.telegram) config.channels.telegram = {};
+
+        const currentBotToken = config.channels.telegram.botToken;
+
+        if (currentBotToken === 'PLACEHOLDER' || !currentBotToken) {
+          console.log('🔧 Updating Telegram configuration with provided bot token');
+          config.channels.telegram = {
+            enabled: true,
+            botToken: envBotToken,
+            dmPolicy: 'pairing',
+            allowFrom: config.channels.telegram.allowFrom || []
+          };
+          needsUpdate = true;
+        } else if (currentBotToken !== envBotToken) {
+          console.log('🔧 Syncing Telegram bot token from environment');
+          config.channels.telegram.botToken = envBotToken;
+          needsUpdate = true;
+        }
+      } else {
+        // No Telegram token provided - disable Telegram if it exists
+        if (config.channels?.telegram?.enabled) {
+          console.log('ℹ️  No Telegram token in environment - disabling Telegram channel');
+          if (!config.channels) config.channels = {};
+          if (!config.channels.telegram) config.channels.telegram = {};
+          config.channels.telegram.enabled = false;
+          needsUpdate = true;
+        }
       }
 
       if (needsUpdate) {
@@ -190,31 +219,44 @@ node /app/pairing-api.js &
 sleep 3
 echo "✅ Stats API ready - Railway will health check on port 8081"
 
-# Verify Telegram config before starting gateway
-echo "🔍 Verifying Telegram channel configuration..."
+# Verify configuration before starting gateway
+echo "🔍 Checking agent configuration..."
 node -e "
   const fs = require('fs');
   const config = JSON.parse(fs.readFileSync('$OPENCLAW_STATE_DIR/openclaw.json', 'utf8'));
-  console.log('Telegram config:', JSON.stringify(config.channels?.telegram || {}, null, 2));
-  if (!config.channels?.telegram?.enabled) {
-    console.error('❌ CRITICAL: Telegram channel is NOT enabled!');
+
+  // Check Telegram configuration (optional)
+  if (config.channels?.telegram?.enabled) {
+    console.log('✅ Telegram channel is enabled');
+    console.log('   Bot Token: ' + (process.env.TELEGRAM_BOT_TOKEN?.substring(0, 10) || 'N/A') + '...');
+  } else {
+    console.log('ℹ️  Telegram channel is not configured (optional)');
+  }
+
+  // Check gateway configuration (required)
+  if (!config.gateway?.http?.endpoints) {
+    console.error('❌ CRITICAL: Gateway HTTP endpoints not configured!');
     process.exit(1);
   }
-  console.log('✅ Telegram channel is enabled');
+  console.log('✅ Gateway HTTP endpoints configured');
 "
 
 if [ $? -ne 0 ]; then
-  echo "❌ Telegram configuration check failed. Cannot start gateway."
+  echo "❌ Configuration check failed. Cannot start gateway."
   echo "📋 Config file contents:"
   cat "$OPENCLAW_STATE_DIR/openclaw.json"
   exit 1
 fi
 
 echo "🌐 Starting OpenClaw gateway on port 18789..."
-echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  echo "📱 Telegram bot token: ${TELEGRAM_BOT_TOKEN:0:10}..."
+else
+  echo "📱 Telegram: Not configured (optional)"
+fi
 echo "🔑 Anthropic API key: ${ANTHROPIC_API_KEY:0:10}..."
 echo ""
-echo "⚠️  IMPORTANT: Gateway will now start. Watch for Telegram channel status in logs."
+echo "⚠️  IMPORTANT: Gateway will now start. Watch for initialization in logs."
 echo ""
 
 # Start the gateway in Docker mode (foreground, no systemd)
