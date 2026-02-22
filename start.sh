@@ -165,6 +165,27 @@ else
         needsUpdate = true;
       }
 
+      // Ensure HTTP endpoints are configured (required for web chat)
+      if (!config.gateway) config.gateway = {};
+      if (!config.gateway.http) config.gateway.http = {};
+      if (!config.gateway.http.endpoints) config.gateway.http.endpoints = {};
+
+      if (!config.gateway.http.endpoints.chatCompletions || !config.gateway.http.endpoints.responses) {
+        console.log('🔧 Configuring HTTP endpoints for web chat');
+        config.gateway.http.endpoints.chatCompletions = { enabled: true };
+        config.gateway.http.endpoints.responses = { enabled: true };
+        needsUpdate = true;
+      }
+
+      // Ensure gateway authentication is configured
+      if (!config.gateway.auth) config.gateway.auth = {};
+      if (!config.gateway.auth.mode || !config.gateway.auth.token) {
+        console.log('🔧 Configuring gateway authentication');
+        config.gateway.auth.mode = 'token';
+        config.gateway.auth.token = process.env.PAIRING_API_SECRET;
+        needsUpdate = true;
+      }
+
       // Update Telegram bot token if provided (warm instance reconfiguration)
       const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
 
